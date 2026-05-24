@@ -552,6 +552,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 				{ value: 'auto', label: t('settings', 'languageAuto') },
 				{ value: 'en', label: t('settings', 'languageEnglish') },
 				{ value: 'tr', label: t('settings', 'languageTurkish') },
+				{ value: 'zh', label: t('settings', 'languageChinese') },
 			],
 			onAfterChange: () => {
 				this.display();
