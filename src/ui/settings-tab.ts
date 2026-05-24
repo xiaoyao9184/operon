@@ -13,8 +13,8 @@
 
 import { AbstractInputSuggest, App, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, ToggleComponent, getIcon, setIcon } from 'obsidian';
 import type { DropdownComponent, TextComponent } from 'obsidian';
-import { OperonSettings, DEFAULT_SETTINGS, DEFAULT_INLINE_TASK_TARGET_FILE, DEFAULT_INLINE_TASK_HEADING_KEYWORD, DEFAULT_INLINE_TASK_PARENT_FILE_HEADING_KEYWORD, KeyMapping, FilterSet, CALENDAR_TIME_GRID_SCALE_OPTIONS, CALENDAR_AUTO_SCROLL_POSITION_OPTIONS, CALENDAR_SIDEBAR_WIDTH_MIN, CALENDAR_SIDEBAR_WIDTH_MAX, KANBAN_EXPANDED_COLUMN_WIDTH_MIN, KANBAN_EXPANDED_COLUMN_WIDTH_MAX, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MIN, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MAX, createExternalCalendarSourceId, ExternalCalendarSource, TaskCreatorToolbarFieldKey, TaskCreatorToolbarItem, TASK_CREATOR_FALLBACK_FIELD_ICONS, InlineTaskCompactChipKey, INLINE_TASK_COMPACT_FALLBACK_ICONS, TrackerTaskDescriptionClickAction, TASK_FINDER_DEFAULT_SCOPE_ORDER, TaskFinderDefaultScopeKey, normalizeTaskFinderShortcutValue, FLOW_TIME_PAUSE_MINUTE_OPTIONS, FLOW_TIME_DEFAULT_SESSION_MINUTE_OPTIONS, cloneFilterSet, getNumericConstraint, isNumericSettingKey, normalizeCalendarSidebarDefaultExpansionState, normalizeInlineTaskHeadingKeyword, normalizeInlineTaskParentFileHeadingKeyword, setNumericSetting, type CalendarSidebarDefaultStateKey } from '../types/settings';
-import { clonePipeline, composeStatusValue, createPipelineId, createStatusId, Pipeline } from '../types/pipeline';
+import { OperonSettings, DEFAULT_SETTINGS, DEFAULT_INLINE_TASK_TARGET_FILE, DEFAULT_INLINE_TASK_HEADING_KEYWORD, DEFAULT_INLINE_TASK_PARENT_FILE_HEADING_KEYWORD, KeyMapping, FilterSet, CALENDAR_TIME_GRID_SCALE_OPTIONS, CALENDAR_AUTO_SCROLL_POSITION_OPTIONS, CALENDAR_SIDEBAR_WIDTH_MIN, CALENDAR_SIDEBAR_WIDTH_MAX, KANBAN_EXPANDED_COLUMN_WIDTH_MIN, KANBAN_EXPANDED_COLUMN_WIDTH_MAX, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MIN, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MAX, createExternalCalendarSourceId, ExternalCalendarSource, TaskCreatorToolbarFieldKey, TaskCreatorToolbarItem, TASK_CREATOR_FALLBACK_FIELD_ICONS, InlineTaskCompactChipKey, INLINE_TASK_COMPACT_FALLBACK_ICONS, TrackerTaskDescriptionClickAction, TASK_FINDER_DEFAULT_SCOPE_ORDER, TaskFinderDefaultScopeKey, normalizeTaskFinderShortcutValue, FLOW_TIME_PAUSE_MINUTE_OPTIONS, FLOW_TIME_DEFAULT_SESSION_MINUTE_OPTIONS, cloneFilterSet, getNumericConstraint, isNumericSettingKey, normalizeCalendarSidebarDefaultExpansionState, normalizeInlineTaskHeadingKeyword, normalizeInlineTaskParentFileHeadingKeyword, setNumericSetting, type CalendarSidebarDefaultStateKey, type FallbackTaskIconSource } from '../types/settings';
+import { clonePipeline, composeStatusValue, createPipelineId, createStatusId, Pipeline, StatusDefinition } from '../types/pipeline';
 import { PriorityDefinition, DEFAULT_PRIORITIES, clonePriorityDefinition, createPriorityId } from '../types/priority';
 import { CalendarPreset, createCalendarPresetId } from '../types/calendar';
 import { APPEARANCE_SCHEME_LIGHT_OPTIONS, APPEARANCE_SCHEME_DARK_OPTIONS, addAppearanceSchemeOptions } from './appearance-schemes';
@@ -40,13 +40,15 @@ import {
 import { OperonStorage } from '../storage/operon-storage';
 import { PinnedCache } from '../storage/pinned-cache';
 import { t } from '../core/i18n';
-import { getAppLocale } from '../core/obsidian-app';
+import { getAppLocale, isDailyNotesCoreAvailable } from '../core/obsidian-app';
+import { resolveEffectiveInlineTaskSaveMode } from '../core/inline-task-save-mode';
 import { FilterSetModal, FilterModalEvalDeps } from './filter-set-modal';
 import { ExternalCalendarSourceEditModal } from './external-calendar-source-edit-modal';
 import { CalendarPresetQuickSettingsModal } from './calendar/calendar-preset-quick-settings-modal';
 import { KanbanPresetQuickSettingsModal } from './kanban/kanban-preset-quick-settings-modal';
 import { OperonIndexer } from '../indexer/indexer';
 import { ConfirmActionModal } from './confirm-action-modal';
+import { FileTaskMigrationProgressModal } from './file-task-migration-progress-modal';
 import { CalendarFilterPickerModal } from './calendar/calendar-filter-picker-modal';
 import { showTimePicker } from './field-pickers/time-picker';
 import { bindOperonHoverTooltip } from './operon-hover-tooltip';
@@ -105,6 +107,18 @@ import {
 	normalizeSettingsFolderPath,
 	sanitizeExcludedFoldersForFileTasksFolder,
 } from '../core/settings-folder-rules';
+import {
+	applyFileTaskMigration,
+	collectFileTaskMigrationPropertyKeyCandidates,
+	collectFileTaskMigrationPropertyValueCandidates,
+	collectFileTaskMigrationTagCandidates,
+	FileTaskMigrationRule,
+	FileTaskMigrationRuleType,
+	FileTaskMigrationScanResult,
+	normalizeFileTaskMigrationTag,
+	scanFileTaskMigration,
+	validateFileTaskMigrationScan,
+} from '../core/file-task-migration';
 import { renderCompactChipSettingsSection } from './settings/compact-chip-settings-renderer';
 import { runSettingsAsync, settingsAsyncHandler } from './settings/async-settings-action';
 import { parsePresetNumber } from './settings/preset-control-helpers';
@@ -306,6 +320,45 @@ class FileSuggest extends AbstractInputSuggest<TFile> {
 		this.textInputEl.value = file.path;
 		this.textInputEl.trigger('input');
 		this.selectCallback(file);
+		this.close();
+	}
+}
+
+class TextValueSuggest extends AbstractInputSuggest<string> {
+	private textInputEl: HTMLInputElement;
+	private valueProvider: () => string[];
+	private formatValue: (value: string) => string;
+
+	constructor(
+		app: App,
+		inputEl: HTMLInputElement,
+		valueProvider: () => string[],
+		options: { formatValue?: (value: string) => string } = {},
+	) {
+		super(app, inputEl);
+		this.textInputEl = inputEl;
+		this.valueProvider = valueProvider;
+		this.formatValue = options.formatValue ?? (value => value);
+	}
+
+	getSuggestions(query: string): string[] {
+		const lowerQuery = query.trim().toLowerCase().replace(/^#/, '');
+		return this.valueProvider()
+			.filter(value => {
+				const displayValue = this.formatValue(value);
+				const searchValue = `${value} ${displayValue}`.toLowerCase().replace(/^#/, '');
+				return !lowerQuery || searchValue.includes(lowerQuery);
+			})
+			.slice(0, 20);
+	}
+
+	renderSuggestion(value: string, el: HTMLElement): void {
+		el.setText(this.formatValue(value));
+	}
+
+	selectSuggestion(value: string): void {
+		this.textInputEl.value = this.formatValue(value);
+		this.textInputEl.trigger('input');
 		this.close();
 	}
 }
@@ -661,14 +714,17 @@ export class OperonSettingsTab extends PluginSettingTab {
 
 	private renderTasksInlineTasksTab(containerEl: HTMLElement): void {
 		renderSettingsHeading(containerEl, t('settings', 'inlineTasksSection'));
+		const dailyNotesAvailable = isDailyNotesCoreAvailable(this.app);
+		const effectiveInlineTaskSaveMode = resolveEffectiveInlineTaskSaveMode(this.settings, dailyNotesAvailable);
 
 		this.renderBoundDropdownSetting(containerEl, t('settings', 'inlineTaskDefaultSavePath'), t('settings', 'inlineTaskDefaultSavePathDesc'), 'inlineTaskUseDailyNote', {
-			value: this.settings.inlineTaskUseDailyNote ? 'daily-notes' : 'specific-file',
+			value: effectiveInlineTaskSaveMode,
 			dropdownOptions: [
 				{ value: 'daily-notes', label: t('settings', 'inlineTaskSavePathDailyNotes') },
 				{ value: 'specific-file', label: t('settings', 'inlineTaskSavePathSpecificFile') },
 			],
 			normalize: value => value === 'daily-notes',
+			disabled: !dailyNotesAvailable,
 			onAfterChange: () => {
 				this.display();
 			},
@@ -678,7 +734,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			placeholder: DEFAULT_INLINE_TASK_TARGET_FILE,
 			settingClass: 'operon-settings-long-text-setting',
 			controlClass: 'operon-settings-input-long',
-			disabled: this.settings.inlineTaskUseDailyNote,
+			disabled: effectiveInlineTaskSaveMode === 'daily-notes',
 			configure: text => {
 				new FileSuggest(this.app, text.inputEl, settingsAsyncHandler('settings inline target file selection failed', async (file) => {
 					this.settings.inlineTaskTargetFile = file.path;
@@ -686,7 +742,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 				}));
 			},
 		});
-		this.decorateActivationSetting(targetFileSetting, !this.settings.inlineTaskUseDailyNote);
+		this.decorateActivationSetting(targetFileSetting, effectiveInlineTaskSaveMode === 'specific-file');
 
 		const inlineHeadingSetting = renderTextSetting({
 			containerEl,
@@ -696,7 +752,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			placeholder: DEFAULT_INLINE_TASK_HEADING_KEYWORD,
 			settingClass: 'operon-settings-long-text-setting',
 			controlClass: 'operon-settings-input-long',
-			disabled: !this.settings.inlineTaskUseDailyNote,
+			disabled: effectiveInlineTaskSaveMode !== 'daily-notes',
 			configure: text => {
 				text.inputEl.addEventListener('blur', settingsAsyncHandler('settings inline task heading keyword blur failed', async () => {
 					const normalized = normalizeInlineTaskHeadingKeyword(text.inputEl.value);
@@ -710,7 +766,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 				await this.saveSettings();
 			},
 		});
-		this.decorateActivationSetting(inlineHeadingSetting, this.settings.inlineTaskUseDailyNote);
+		this.decorateActivationSetting(inlineHeadingSetting, effectiveInlineTaskSaveMode === 'daily-notes');
 
 		renderSettingsHeading(containerEl, t('settings', 'parentAwareInlineSaveLocation'));
 
@@ -765,9 +821,45 @@ export class OperonSettingsTab extends PluginSettingTab {
 
 	private renderInterfaceStateIconsTab(containerEl: HTMLElement): void {
 		renderSettingsHeading(containerEl, t('settings', 'fallbackTaskStateIcons'));
+		this.renderFallbackTaskIconSourceSetting(containerEl);
 		this.renderStateIconSetting(containerEl, 'open', t('settings', 'fallbackOpenStateIcon'), t('settings', 'fallbackOpenStateIconDesc'));
 		this.renderStateIconSetting(containerEl, 'done', t('settings', 'fallbackFinishedStateIcon'), t('settings', 'fallbackFinishedStateIconDesc'));
 		this.renderStateIconSetting(containerEl, 'cancelled', t('settings', 'fallbackCancelledStateIcon'), t('settings', 'fallbackCancelledStateIconDesc'));
+	}
+
+	private renderFallbackTaskIconSourceSetting(containerEl: HTMLElement): void {
+		const setting = new Setting(containerEl)
+			.setName(t('settings', 'fallbackTaskIconSource'))
+			.setDesc(t('settings', 'fallbackTaskIconSourceDesc'));
+		setting.settingEl.addClass('operon-fallback-icon-source-setting');
+
+		const controls = setting.controlEl.createDiv('operon-fallback-icon-source-control');
+		this.renderFallbackTaskIconSourceButton(controls, 'pipelineStatusIcon', t('settings', 'fallbackTaskIconSourcePipelineStatus'));
+		this.renderFallbackTaskIconSourceButton(controls, 'priorityIcon', t('settings', 'fallbackTaskIconSourcePriority'));
+		this.renderFallbackTaskIconSourceButton(controls, 'stateIcon', t('settings', 'fallbackTaskIconSourceState'));
+	}
+
+	private renderFallbackTaskIconSourceButton(
+		containerEl: HTMLElement,
+		source: FallbackTaskIconSource,
+		label: string,
+	): void {
+		const active = this.settings.fallbackTaskIconSource === source;
+		const button = containerEl.createEl('button', {
+			text: label,
+			cls: 'operon-fallback-icon-source-button',
+			attr: {
+				type: 'button',
+				'aria-pressed': active ? 'true' : 'false',
+			},
+		});
+		button.toggleClass('is-active', active);
+		button.addEventListener('click', settingsAsyncHandler('settings fallback task icon source change failed', async () => {
+			if (this.settings.fallbackTaskIconSource === source) return;
+			this.settings.fallbackTaskIconSource = source;
+			await this.saveSettings();
+			this.display();
+		}));
 	}
 
 	private decorateActivationSetting(setting: Setting, active: boolean): void {
@@ -3546,6 +3638,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			className: 'operon-priority-column-header',
 			labels: [
 				t('settings', 'pipelineColumnColor'),
+				t('settings', 'priorityColumnIcon'),
 				t('settings', 'priorityColumnLabel'),
 				t('settings', 'pipelineColumnStats'),
 				'',
@@ -3610,6 +3703,8 @@ export class OperonSettingsTab extends PluginSettingTab {
 		refresh: () => void,
 	): void {
 		const committedPriority = committedPriorities.find(candidate => candidate.id === priority.id) ?? clonePriorityDefinition(priority);
+		const priorityId = priority.id;
+		const getCurrentPriority = (): PriorityDefinition | null => this.findSettingsPriority(priorityId, priority.label);
 		const row = listEl.createDiv('operon-priority-row');
 
 		createWorkflowColorSwatch({
@@ -3618,10 +3713,14 @@ export class OperonSettingsTab extends PluginSettingTab {
 			label: t('settings', 'priorityColorAria', { name: priority.label }),
 			errorContext: 'settings priority color change failed',
 			onChange: async (value) => {
-				priority.color = value;
+				const currentPriority = getCurrentPriority();
+				if (!currentPriority) return;
+				currentPriority.color = value;
 				await this.saveSettings();
 			},
 		});
+
+		this.renderPriorityIconPicker(row, priority);
 
 		// Label input
 		const labelInput = createWorkflowInput({
@@ -3723,6 +3822,88 @@ export class OperonSettingsTab extends PluginSettingTab {
 		});
 	}
 
+	private renderPriorityIconPicker(
+		containerEl: HTMLElement,
+		priority: PriorityDefinition,
+	): void {
+		const priorityId = priority.id;
+		const iconButton = containerEl.createEl('button', {
+			cls: 'operon-priority-icon-trigger',
+			attr: {
+				type: 'button',
+			},
+		});
+		bindOperonHoverTooltip(iconButton, {
+			content: t('settings', 'priorityIconTooltip'),
+			taskColor: priority.color || null,
+		});
+
+		const getCurrentPriority = (): PriorityDefinition | null => this.findSettingsPriority(priorityId, priority.label);
+		const getStoredIcon = (): string => normalizeTaskIconValue(getCurrentPriority()?.priorityIcon);
+		const refreshIconPreview = (iconName = getStoredIcon()): void => {
+			const normalizedIcon = normalizeTaskIconValue(iconName);
+			const selectedIcon = normalizedIcon ? getIcon(normalizedIcon) : null;
+			const iconEl = selectedIcon ?? getIcon('plus');
+
+			iconButton.empty();
+			iconButton.toggleClass('has-icon', !!selectedIcon);
+			iconButton.toggleClass('is-placeholder', !selectedIcon);
+			setAccessibleLabelWithoutTooltip(
+				iconButton,
+				t('settings', 'priorityIconAria', { name: priority.label }),
+			);
+			if (!iconEl) return;
+			iconEl.addClass('operon-priority-icon-preview');
+			iconButton.appendChild(iconEl);
+		};
+		const commitIconValue = async (nextValue: string): Promise<void> => {
+			const normalizedIcon = normalizeTaskIconValue(nextValue);
+			const currentPriority = getCurrentPriority();
+			if (!currentPriority) return;
+			if (normalizedIcon) {
+				currentPriority.priorityIcon = normalizedIcon;
+			} else {
+				delete currentPriority.priorityIcon;
+			}
+			refreshIconPreview(normalizedIcon);
+			await this.saveSettings();
+		};
+
+		let closeIconPicker: (() => void) | null = null;
+		const openPicker = (): void => {
+			if (closeIconPicker) return;
+			closeIconPicker = showIconPicker(iconButton, {
+				value: getStoredIcon(),
+				query: '',
+				onSelect: iconId => {
+					closeIconPicker = null;
+					runSettingsAsync('settings priority icon change failed', () => commitIconValue(iconId));
+				},
+				onClear: () => {
+					closeIconPicker = null;
+					runSettingsAsync('settings priority icon clear failed', () => commitIconValue(''));
+				},
+				onClose: () => {
+					closeIconPicker = null;
+				},
+			});
+		};
+
+		refreshIconPreview();
+		iconButton.addEventListener('mousedown', event => event.preventDefault());
+		iconButton.addEventListener('click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			openPicker();
+		});
+	}
+
+	private findSettingsPriority(priorityId: string, fallbackLabel: string): PriorityDefinition | null {
+		return this.settings.priorities.find(candidate => candidate.id === priorityId)
+			?? this.settings.priorities.find(candidate => candidate.label === fallbackLabel)
+			?? null;
+	}
+
 	private buildPriorityCounts(): Map<string, number> {
 		const counts = new Map<string, number>();
 		if (!this.indexer) return counts;
@@ -3798,6 +3979,8 @@ export class OperonSettingsTab extends PluginSettingTab {
 	private renderPipelineCard(containerEl: HTMLElement, pipeline: Pipeline, pipelineIndex: number, refresh: () => void): void {
 		const committedPipeline = clonePipeline(pipeline);
 		const statusCounts = this.buildPipelineStatusCounts(pipeline);
+		const pipelineId = pipeline.id;
+		const getCurrentPipeline = (): Pipeline | null => this.findSettingsPipeline(pipelineId, pipeline.name, pipelineIndex);
 		const card = containerEl.createDiv('operon-pipeline-card');
 
 		// Pipeline header row
@@ -3843,7 +4026,9 @@ export class OperonSettingsTab extends PluginSettingTab {
 		defaultRadio.checked = this.settings.defaultPipelineName === pipeline.name;
 		defaultRadio.addEventListener('change', settingsAsyncHandler('settings default pipeline change failed', async () => {
 			if (!defaultRadio.checked) return;
-			this.settings.defaultPipelineName = pipeline.name;
+			const currentPipeline = getCurrentPipeline();
+			if (!currentPipeline) return;
+			this.settings.defaultPipelineName = currentPipeline.name;
 			await this.saveSettings();
 			refresh();
 		}));
@@ -3861,10 +4046,14 @@ export class OperonSettingsTab extends PluginSettingTab {
 			danger: true,
 			errorContext: 'settings pipeline delete failed',
 			onClick: async () => {
-				const confirmed = await this.confirmDeletePipeline(pipeline.name);
+				const currentPipeline = getCurrentPipeline();
+				if (!currentPipeline) return;
+				const currentPipelineIndex = this.settings.pipelines.findIndex(candidate => candidate.id === currentPipeline.id);
+				if (currentPipelineIndex < 0) return;
+				const confirmed = await this.confirmDeletePipeline(currentPipeline.name);
 				if (!confirmed) return;
-				const deletedWasDefault = this.settings.defaultPipelineName === pipeline.name;
-				this.settings.pipelines.splice(pipelineIndex, 1);
+				const deletedWasDefault = this.settings.defaultPipelineName === currentPipeline.name;
+				this.settings.pipelines.splice(currentPipelineIndex, 1);
 				if (deletedWasDefault) {
 					this.settings.defaultPipelineName = this.settings.pipelines[0]?.name ?? '';
 				} else if (!this.settings.pipelines.some(candidate => candidate.name === this.settings.defaultPipelineName)) {
@@ -3880,6 +4069,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			className: 'operon-status-column-header',
 			labels: [
 				t('settings', 'pipelineColumnColor'),
+				t('settings', 'pipelineColumnIcon'),
 				t('settings', 'pipelineColumnStatusLabel'),
 				t('settings', 'pipelineColumnStats'),
 				t('settings', 'pipelineColumnScheduled'),
@@ -3904,11 +4094,13 @@ export class OperonSettingsTab extends PluginSettingTab {
 			className: 'operon-status-add-button operon-settings-accent-hover-button',
 			errorContext: 'settings pipeline status add failed',
 			onClick: async () => {
+				const currentPipeline = getCurrentPipeline();
+				if (!currentPipeline) return;
 				const label = createUniqueTaxonomyLabel(
 					t('settings', 'newStatusLabel'),
-					pipeline.statuses.map(status => status.label),
+					currentPipeline.statuses.map(status => status.label),
 				);
-				pipeline.statuses.push({
+				currentPipeline.statuses.push({
 					id: createStatusId(),
 					label,
 					color: '#808080',
@@ -3937,6 +4129,11 @@ export class OperonSettingsTab extends PluginSettingTab {
 		refresh: () => void,
 	): void {
 		const status = pipeline.statuses[statusIndex];
+		const pipelineId = pipeline.id;
+		const statusId = status.id;
+		const getCurrentStatus = (): { pipeline: Pipeline; status: StatusDefinition; statusIndex: number } | null => {
+			return this.findSettingsPipelineStatus(pipelineId, pipeline.name, statusId, status.label, pipelineIndex);
+		};
 		const row = containerEl.createDiv('operon-status-row');
 
 		createWorkflowColorSwatch({
@@ -3945,10 +4142,14 @@ export class OperonSettingsTab extends PluginSettingTab {
 			label: t('settings', 'statusColorAria', { pipeline: pipeline.name, status: status.label }),
 			errorContext: 'settings pipeline status color change failed',
 			onChange: async (value) => {
-				status.color = value;
+				const current = getCurrentStatus();
+				if (!current) return;
+				current.status.color = value;
 				await this.saveSettings();
 			},
 		});
+
+		this.renderPipelineStatusIconPicker(row, pipeline, status);
 
 		// Label input
 		const labelInput = createWorkflowInput({
@@ -3969,7 +4170,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 				labelInput.value = committedStatus.label;
 				return;
 			}
-			const currentPipeline = this.settings.pipelines[pipelineIndex] ?? pipeline;
+			const currentPipeline = this.findSettingsPipeline(pipelineId, pipeline.name, pipelineIndex) ?? pipeline;
 			if (hasDuplicateStatusLabel(currentPipeline.statuses, status.id, trimmed)) {
 				new Notice(t('settings', 'statusAlreadyExists', { name: trimmed }));
 				labelInput.value = committedStatus.label;
@@ -3990,9 +4191,9 @@ export class OperonSettingsTab extends PluginSettingTab {
 
 		let scheduledToggle: HTMLInputElement | null = null;
 		let trackingToggle: HTMLInputElement | null = null;
-		const clearAutomationTargets = () => {
-			status.isScheduledTarget = false;
-			status.isTrackingTarget = false;
+		const clearAutomationTargets = (targetStatus: StatusDefinition) => {
+			targetStatus.isScheduledTarget = false;
+			targetStatus.isTrackingTarget = false;
 			if (scheduledToggle) scheduledToggle.checked = false;
 			if (trackingToggle) trackingToggle.checked = false;
 		};
@@ -4015,11 +4216,13 @@ export class OperonSettingsTab extends PluginSettingTab {
 		scheduledToggle.checked = status.isScheduledTarget;
 		scheduledToggle.disabled = automationDisabled;
 		scheduledToggle.addEventListener('change', settingsAsyncHandler('settings scheduled target change failed', async () => {
+			const current = getCurrentStatus();
+			if (!current) return;
 			const nextValue = scheduledToggle?.checked === true;
-			for (const candidate of pipeline.statuses) {
+			for (const candidate of current.pipeline.statuses) {
 				candidate.isScheduledTarget = false;
 			}
-			status.isScheduledTarget = nextValue;
+			current.status.isScheduledTarget = nextValue;
 			await this.saveSettings();
 			refresh();
 		}));
@@ -4039,11 +4242,13 @@ export class OperonSettingsTab extends PluginSettingTab {
 		trackingToggle.checked = status.isTrackingTarget;
 		trackingToggle.disabled = automationDisabled;
 		trackingToggle.addEventListener('change', settingsAsyncHandler('settings tracking target change failed', async () => {
+			const current = getCurrentStatus();
+			if (!current) return;
 			const nextValue = trackingToggle?.checked === true;
-			for (const candidate of pipeline.statuses) {
+			for (const candidate of current.pipeline.statuses) {
 				candidate.isTrackingTarget = false;
 			}
-			status.isTrackingTarget = nextValue;
+			current.status.isTrackingTarget = nextValue;
 			await this.saveSettings();
 			refresh();
 		}));
@@ -4064,15 +4269,17 @@ export class OperonSettingsTab extends PluginSettingTab {
 		finishedToggle.checked = status.isFinished;
 		finishedToggle.disabled = terminalDisabled;
 		finishedToggle.addEventListener('change', settingsAsyncHandler('settings finished status change failed', async () => {
+			const current = getCurrentStatus();
+			if (!current) return;
 			const nextValue = finishedToggle.checked;
-			for (const candidate of pipeline.statuses) {
+			for (const candidate of current.pipeline.statuses) {
 				candidate.isFinished = false;
 			}
-			status.isFinished = nextValue;
+			current.status.isFinished = nextValue;
 			if (nextValue) {
-				status.isCancelled = false;
+				current.status.isCancelled = false;
 				cancelledToggle.checked = false;
-				clearAutomationTargets();
+				clearAutomationTargets(current.status);
 			}
 			await this.saveSettings();
 			refresh();
@@ -4094,15 +4301,17 @@ export class OperonSettingsTab extends PluginSettingTab {
 		cancelledToggle.checked = status.isCancelled;
 		cancelledToggle.disabled = terminalDisabled;
 		cancelledToggle.addEventListener('change', settingsAsyncHandler('settings cancelled status change failed', async () => {
+			const current = getCurrentStatus();
+			if (!current) return;
 			const nextValue = cancelledToggle.checked;
-			for (const candidate of pipeline.statuses) {
+			for (const candidate of current.pipeline.statuses) {
 				candidate.isCancelled = false;
 			}
-			status.isCancelled = nextValue;
+			current.status.isCancelled = nextValue;
 			if (nextValue) {
-				status.isFinished = false;
+				current.status.isFinished = false;
 				finishedToggle.checked = false;
-				clearAutomationTargets();
+				clearAutomationTargets(current.status);
 			}
 			await this.saveSettings();
 			refresh();
@@ -4118,9 +4327,12 @@ export class OperonSettingsTab extends PluginSettingTab {
 			placeholder: statusIndex <= 0,
 			errorContext: 'settings status move up failed',
 			onClick: async () => {
-				const tmp = pipeline.statuses[statusIndex - 1];
-				pipeline.statuses[statusIndex - 1] = pipeline.statuses[statusIndex];
-				pipeline.statuses[statusIndex] = tmp;
+				const current = getCurrentStatus();
+				if (!current || current.statusIndex <= 0) return;
+				const statuses = current.pipeline.statuses;
+				const tmp = statuses[current.statusIndex - 1];
+				statuses[current.statusIndex - 1] = statuses[current.statusIndex];
+				statuses[current.statusIndex] = tmp;
 				await this.saveSettings();
 				refresh();
 			},
@@ -4134,9 +4346,12 @@ export class OperonSettingsTab extends PluginSettingTab {
 			placeholder: statusIndex >= pipeline.statuses.length - 1,
 			errorContext: 'settings status move down failed',
 			onClick: async () => {
-				const tmp = pipeline.statuses[statusIndex + 1];
-				pipeline.statuses[statusIndex + 1] = pipeline.statuses[statusIndex];
-				pipeline.statuses[statusIndex] = tmp;
+				const current = getCurrentStatus();
+				if (!current || current.statusIndex >= current.pipeline.statuses.length - 1) return;
+				const statuses = current.pipeline.statuses;
+				const tmp = statuses[current.statusIndex + 1];
+				statuses[current.statusIndex + 1] = statuses[current.statusIndex];
+				statuses[current.statusIndex] = tmp;
 				await this.saveSettings();
 				refresh();
 			},
@@ -4150,17 +4365,133 @@ export class OperonSettingsTab extends PluginSettingTab {
 			danger: true,
 			errorContext: 'settings status delete failed',
 			onClick: async () => {
-				if (pipeline.statuses.length <= 1) {
+				const current = getCurrentStatus();
+				if (!current) return;
+				if (current.pipeline.statuses.length <= 1) {
 					new Notice(t('settings', 'pipelineAtLeastOneStatus'));
 					return;
 				}
-				const confirmed = await this.confirmDeleteStatus(status.label, pipeline.name);
+				const confirmed = await this.confirmDeleteStatus(current.status.label, current.pipeline.name);
 				if (!confirmed) return;
-				pipeline.statuses.splice(statusIndex, 1);
+				current.pipeline.statuses.splice(current.statusIndex, 1);
 				await this.saveSettings();
 				refresh();
 			},
 		});
+	}
+
+	private renderPipelineStatusIconPicker(
+		containerEl: HTMLElement,
+		pipeline: Pipeline,
+		status: StatusDefinition,
+	): void {
+		const pipelineId = pipeline.id;
+		const statusId = status.id;
+		const iconButton = containerEl.createEl('button', {
+			cls: 'operon-status-icon-trigger',
+			attr: {
+				type: 'button',
+			},
+		});
+		bindOperonHoverTooltip(iconButton, {
+			content: t('settings', 'statusIconTooltip'),
+			taskColor: status.color || null,
+		});
+
+		const getCurrentStatus = (): StatusDefinition | null => this.findSettingsPipelineStatus(
+			pipelineId,
+			pipeline.name,
+			statusId,
+			status.label,
+		)?.status ?? null;
+		const getStoredIcon = (): string => normalizeTaskIconValue(getCurrentStatus()?.pipelineStatusIcon);
+		const refreshIconPreview = (iconName = getStoredIcon()): void => {
+			const normalizedIcon = normalizeTaskIconValue(iconName);
+			const selectedIcon = normalizedIcon ? getIcon(normalizedIcon) : null;
+			const iconEl = selectedIcon ?? getIcon('plus');
+
+			iconButton.empty();
+			iconButton.toggleClass('has-icon', !!selectedIcon);
+			iconButton.toggleClass('is-placeholder', !selectedIcon);
+			setAccessibleLabelWithoutTooltip(
+				iconButton,
+				t('settings', 'statusIconAria', { pipeline: pipeline.name, status: status.label }),
+			);
+			if (!iconEl) return;
+			iconEl.addClass('operon-status-icon-preview');
+			iconButton.appendChild(iconEl);
+		};
+		const commitIconValue = async (nextValue: string): Promise<void> => {
+			const normalizedIcon = normalizeTaskIconValue(nextValue);
+			const currentStatus = getCurrentStatus();
+			if (!currentStatus) return;
+			if (normalizedIcon) {
+				currentStatus.pipelineStatusIcon = normalizedIcon;
+			} else {
+				delete currentStatus.pipelineStatusIcon;
+			}
+			refreshIconPreview(normalizedIcon);
+			await this.saveSettings();
+		};
+
+		let closeIconPicker: (() => void) | null = null;
+		const openPicker = (): void => {
+			if (closeIconPicker) return;
+			closeIconPicker = showIconPicker(iconButton, {
+				value: getStoredIcon(),
+				query: '',
+				onSelect: iconId => {
+					closeIconPicker = null;
+					runSettingsAsync('settings pipeline status icon change failed', () => commitIconValue(iconId));
+				},
+				onClear: () => {
+					closeIconPicker = null;
+					runSettingsAsync('settings pipeline status icon clear failed', () => commitIconValue(''));
+				},
+				onClose: () => {
+					closeIconPicker = null;
+				},
+			});
+		};
+
+		refreshIconPreview();
+		iconButton.addEventListener('mousedown', event => event.preventDefault());
+		iconButton.addEventListener('click', event => {
+			event.preventDefault();
+			event.stopPropagation();
+			openPicker();
+		});
+	}
+
+	private findSettingsPipeline(
+		pipelineId: string,
+		fallbackName: string,
+		fallbackIndex?: number,
+	): Pipeline | null {
+		return this.settings.pipelines.find(candidate => candidate.id === pipelineId)
+			?? this.settings.pipelines.find(candidate => candidate.name === fallbackName)
+			?? (typeof fallbackIndex === 'number' ? this.settings.pipelines[fallbackIndex] ?? null : null);
+	}
+
+	private findSettingsPipelineStatus(
+		pipelineId: string,
+		fallbackPipelineName: string,
+		statusId: string,
+		fallbackStatusLabel: string,
+		fallbackPipelineIndex?: number,
+	): { pipeline: Pipeline; status: StatusDefinition; statusIndex: number } | null {
+		const pipeline = this.findSettingsPipeline(pipelineId, fallbackPipelineName, fallbackPipelineIndex);
+		if (!pipeline) return null;
+		let statusIndex = pipeline.statuses.findIndex(candidate => candidate.id === statusId);
+		if (statusIndex < 0) {
+			statusIndex = pipeline.statuses.findIndex(candidate => candidate.label === fallbackStatusLabel);
+		}
+		if (statusIndex < 0) return null;
+		return {
+			pipeline,
+			status: pipeline.statuses[statusIndex],
+			statusIndex,
+		};
 	}
 
 	private buildPipelineStatusCounts(pipeline: Pipeline): Map<string, number> {
@@ -5246,9 +5577,16 @@ export class OperonSettingsTab extends PluginSettingTab {
 
 		this.renderExcludedFolderSettings(containerEl);
 
-		this.renderBoundToggleSetting(containerEl, t('settings', 'createDailyNotesAsOperonTask'), t('settings', 'createDailyNotesAsOperonTaskDesc'), 'createDailyNotesAsOperonTask');
+		this.renderFileTaskDailyNotesSettings(containerEl);
+		this.renderFileTaskMigrationSettings(containerEl);
 
 		renderPreview();
+	}
+
+	private renderFileTaskDailyNotesSettings(containerEl: HTMLElement): void {
+		const wrapper = containerEl.createDiv({ cls: 'operon-file-task-daily-notes-setting' });
+		renderSettingsHeading(wrapper, t('settings', 'fileTaskDailyNotes'));
+		this.renderBoundToggleSetting(wrapper, t('settings', 'createDailyNotesAsOperonTask'), t('settings', 'createDailyNotesAsOperonTaskDesc'), 'createDailyNotesAsOperonTask');
 	}
 
 	private renderExcludedFolderSettings(containerEl: HTMLElement): void {
@@ -5380,6 +5718,313 @@ export class OperonSettingsTab extends PluginSettingTab {
 		render();
 	}
 
+	private renderFileTaskMigrationSettings(containerEl: HTMLElement): void {
+		const wrapper = containerEl.createDiv({ cls: 'operon-file-task-migration-setting' });
+		renderSettingsHeading(wrapper, t('settings', 'fileTaskMigration'));
+		wrapper.createDiv({
+			text: t('settings', 'fileTaskMigrationDesc'),
+			cls: 'operon-file-task-migration-desc',
+		});
+
+		let selectedType: FileTaskMigrationRuleType = 'folder';
+		let folderPath = '';
+		let tagValue = '';
+		let propertyKey = '';
+		let propertyValue = '';
+		let lastScan: FileTaskMigrationScanResult | null = null;
+		let scanWarning = '';
+
+		const rows = new Map<FileTaskMigrationRuleType, HTMLElement>();
+		const controls = new Map<FileTaskMigrationRuleType, HTMLInputElement[]>();
+
+		const ruleListEl = wrapper.createDiv('operon-file-task-migration-rule-list');
+		const actionRowEl = wrapper.createDiv('operon-file-task-migration-action-row');
+		const scanButton = actionRowEl.createEl('button', {
+			text: t('settings', 'fileTaskMigrationScanVault'),
+			cls: 'operon-settings-primary-button',
+			attr: { type: 'button' },
+		});
+		const resultEl = wrapper.createDiv('operon-file-task-migration-result-wrap');
+		resultEl.setAttribute('aria-live', 'polite');
+		resultEl.setAttribute('role', 'status');
+
+		const buildRule = (): FileTaskMigrationRule | null => {
+			if (selectedType === 'folder') {
+				const normalizedFolder = normalizeSettingsFolderPath(folderPath);
+				return normalizedFolder ? { type: 'folder', folderPath: normalizedFolder } : null;
+			}
+			if (selectedType === 'tag') {
+				const normalizedTag = normalizeFileTaskMigrationTag(tagValue);
+				return normalizedTag ? { type: 'tag', tag: normalizedTag } : null;
+			}
+			const key = propertyKey.trim();
+			const value = propertyValue.trim();
+			return key && value ? { type: 'property', propertyKey: key, propertyValue: value } : null;
+		};
+
+		const updateScanButton = (): void => {
+			scanButton.disabled = buildRule() === null;
+		};
+
+		const renderCompletion = (convertedCount: number, failedCount: number): void => {
+			resultEl.empty();
+			const panel = resultEl.createDiv('operon-file-task-migration-result');
+			panel.createDiv({
+				text: failedCount > 0
+					? t('settings', 'fileTaskMigrationCompletedWithFailures', {
+						converted: String(convertedCount),
+						failed: String(failedCount),
+					})
+					: t('settings', 'fileTaskMigrationCompleted', { converted: String(convertedCount) }),
+				cls: 'operon-file-task-migration-result-title',
+			});
+		};
+
+			const renderScanResult = (): void => {
+				resultEl.empty();
+				if (!lastScan) return;
+
+				const panel = resultEl.createDiv('operon-file-task-migration-result');
+				panel.createDiv({
+					text: t('settings', 'fileTaskMigrationScanResult'),
+					cls: 'operon-file-task-migration-result-title',
+				});
+				panel.createDiv({
+					text: t('settings', 'fileTaskMigrationResultSummary', {
+						total: String(lastScan.totalMatchedCount),
+						convertible: String(lastScan.convertibleFiles.length),
+						already: String(lastScan.alreadyFileTaskFiles.length),
+						excluded: String(lastScan.excludedFiles.length),
+					}),
+					cls: 'operon-file-task-migration-result-summary',
+				});
+				if (scanWarning) {
+					panel.createDiv({
+						text: scanWarning,
+						cls: 'operon-file-task-migration-warning',
+					});
+				}
+				if (lastScan.convertibleFiles.length > 0) {
+					const previewEl = panel.createDiv('operon-file-task-migration-preview');
+					previewEl.createDiv({
+						text: t('settings', 'fileTaskMigrationPreviewTitle'),
+						cls: 'operon-file-task-migration-preview-title',
+					});
+					const listEl = previewEl.createEl('ul');
+					for (const snapshot of lastScan.convertibleSnapshots.slice(0, 10)) {
+						listEl.createEl('li', { text: snapshot.path });
+					}
+					const remaining = Math.max(0, lastScan.convertibleSnapshots.length - 10);
+					if (remaining > 0) {
+						listEl.createEl('li', {
+							text: t('settings', 'fileTaskMigrationPreviewMore', { count: String(remaining) }),
+							cls: 'operon-file-task-migration-preview-more',
+						});
+					}
+				}
+
+				if (lastScan.convertibleFiles.length === 0) return;
+
+				const convertRow = panel.createDiv('operon-file-task-migration-convert-row');
+				const convertButton = convertRow.createEl('button', {
+					text: t('settings', 'fileTaskMigrationConvertFiles', { count: String(lastScan.convertibleFiles.length) }),
+					attr: { type: 'button' },
+				});
+				convertButton.addClass('mod-cta');
+				convertButton.addEventListener('click', settingsAsyncHandler('settings file task migration convert failed', async () => {
+					if (!lastScan || lastScan.convertibleFiles.length === 0) return;
+					convertButton.disabled = true;
+					const validation = validateFileTaskMigrationScan(this.app, this.settings, lastScan);
+					if (!validation.valid) {
+						lastScan = validation.currentScan;
+						scanWarning = validation.abortedReason === 'fileChanged'
+							? t('settings', 'fileTaskMigrationFilesChanged')
+							: t('settings', 'fileTaskMigrationScanChanged');
+						new Notice(scanWarning);
+						renderScanResult();
+						return;
+					}
+					lastScan = validation.currentScan;
+					scanWarning = '';
+					convertButton.disabled = false;
+					new FileTaskMigrationProgressModal(this.app, {
+						scanResult: validation.currentScan,
+						ruleLabel: this.describeFileTaskMigrationRule(validation.currentScan.rule),
+						onConvert: async (onProgress, setStatus) => {
+							const applyResult = await applyFileTaskMigration(this.app, this.settings, validation.currentScan, { onProgress });
+							if (applyResult.abortedReason) {
+								lastScan = applyResult.currentScan ?? validation.currentScan;
+								scanWarning = applyResult.abortedReason === 'fileChanged'
+									? t('settings', 'fileTaskMigrationFilesChanged')
+									: t('settings', 'fileTaskMigrationScanChanged');
+								new Notice(scanWarning);
+								renderScanResult();
+								return applyResult;
+							}
+							if (applyResult.convertedFiles.length > 0 && this.indexer) {
+								setStatus(t('settings', 'fileTaskMigrationReindexing'));
+								await this.indexer.fullReindex();
+								new Notice(t('notifications', 'indexRebuilt', { count: String(this.indexer.taskCount) }));
+							}
+
+							const failedCount = applyResult.failedFiles.length;
+							new Notice(failedCount > 0
+								? t('settings', 'fileTaskMigrationCompletedWithFailures', {
+									converted: String(applyResult.convertedFiles.length),
+									failed: String(failedCount),
+								})
+								: t('settings', 'fileTaskMigrationCompleted', { converted: String(applyResult.convertedFiles.length) }));
+							lastScan = null;
+							scanWarning = '';
+							renderCompletion(applyResult.convertedFiles.length, failedCount);
+							return applyResult;
+						},
+					}).open();
+				}));
+			};
+
+			const clearScan = (): void => {
+				lastScan = null;
+				scanWarning = '';
+				renderScanResult();
+				updateScanButton();
+			};
+
+		const updateActivation = (): void => {
+			for (const [type, row] of rows) {
+				const active = type === selectedType;
+				row.toggleClass('is-active', active);
+				row.toggleClass('is-inactive', !active);
+				for (const input of controls.get(type) ?? []) {
+					input.disabled = !active;
+				}
+			}
+			updateScanButton();
+		};
+
+		const selectType = (type: FileTaskMigrationRuleType): void => {
+			if (selectedType === type) return;
+			selectedType = type;
+			clearScan();
+			updateActivation();
+		};
+
+		const createRuleRow = (
+			type: FileTaskMigrationRuleType,
+			label: string,
+			buildControls: (controlEl: HTMLElement) => HTMLInputElement[],
+		): void => {
+			const row = ruleListEl.createDiv('operon-file-task-migration-rule-row');
+			row.addClass(`operon-file-task-migration-rule-${type}`);
+			const radio = row.createEl('input', {
+				attr: {
+					type: 'radio',
+					name: 'operon-file-task-migration-rule',
+					value: type,
+					'aria-label': label,
+				},
+			});
+			radio.checked = selectedType === type;
+			radio.addEventListener('change', () => {
+				if (radio.checked) selectType(type);
+			});
+			row.createSpan({ text: label, cls: 'operon-file-task-migration-rule-label' });
+			const controlEl = row.createDiv('operon-file-task-migration-rule-control');
+			rows.set(type, row);
+			controls.set(type, buildControls(controlEl));
+		};
+
+		createRuleRow('folder', t('settings', 'fileTaskMigrationFolder'), controlEl => {
+			const input = controlEl.createEl('input', {
+				attr: {
+					type: 'text',
+					placeholder: t('settings', 'fileTaskMigrationFolderPlaceholder'),
+				},
+				cls: 'operon-settings-input-long',
+			});
+			input.addEventListener('input', () => {
+				folderPath = input.value;
+				clearScan();
+			});
+			new FolderSuggest(this.app, input, folder => {
+				folderPath = folder.path;
+				clearScan();
+			});
+			return [input];
+		});
+
+		createRuleRow('tag', t('settings', 'fileTaskMigrationTag'), controlEl => {
+			const input = controlEl.createEl('input', {
+				attr: {
+					type: 'text',
+					placeholder: t('settings', 'fileTaskMigrationTagPlaceholder'),
+				},
+				cls: 'operon-settings-input-long',
+			});
+			input.addEventListener('input', () => {
+				tagValue = input.value;
+				clearScan();
+			});
+			new TextValueSuggest(this.app, input, () => collectFileTaskMigrationTagCandidates(this.app), {
+				formatValue: value => `#${normalizeFileTaskMigrationTag(value)}`,
+			});
+			return [input];
+		});
+
+		createRuleRow('property', t('settings', 'fileTaskMigrationProperty'), controlEl => {
+			const keyInput = controlEl.createEl('input', {
+				attr: {
+					type: 'text',
+					placeholder: t('settings', 'fileTaskMigrationPropertyKeyPlaceholder'),
+				},
+				cls: 'operon-file-task-migration-property-key',
+			});
+			const valueInput = controlEl.createEl('input', {
+				attr: {
+					type: 'text',
+					placeholder: t('settings', 'fileTaskMigrationPropertyValuePlaceholder'),
+				},
+				cls: 'operon-file-task-migration-property-value',
+			});
+			keyInput.addEventListener('input', () => {
+				propertyKey = keyInput.value;
+				clearScan();
+			});
+			valueInput.addEventListener('input', () => {
+				propertyValue = valueInput.value;
+				clearScan();
+			});
+			new TextValueSuggest(this.app, keyInput, () => collectFileTaskMigrationPropertyKeyCandidates(this.app));
+			new TextValueSuggest(this.app, valueInput, () => collectFileTaskMigrationPropertyValueCandidates(this.app, propertyKey));
+			return [keyInput, valueInput];
+		});
+
+		scanButton.addEventListener('click', () => {
+			const rule = buildRule();
+			if (!rule) {
+				new Notice(t('settings', 'fileTaskMigrationMissingRule'));
+				return;
+			}
+				lastScan = scanFileTaskMigration(this.app, this.settings, rule);
+				scanWarning = '';
+				renderScanResult();
+			});
+
+		updateActivation();
+	}
+
+			private describeFileTaskMigrationRule(rule: FileTaskMigrationRule): string {
+				if (rule.type === 'folder') {
+					return t('settings', 'fileTaskMigrationRuleFolderValue', { value: rule.folderPath });
+			}
+			if (rule.type === 'tag') {
+				return t('settings', 'fileTaskMigrationRuleTagValue', { value: `#${normalizeFileTaskMigrationTag(rule.tag)}` });
+			}
+			return t('settings', 'fileTaskMigrationRulePropertyValue', {
+				key: rule.propertyKey,
+				value: rule.propertyValue,
+			});
+		}
 	private async persistSettingsOnly(): Promise<void> {
 		await this.storage.saveSettings();
 	}

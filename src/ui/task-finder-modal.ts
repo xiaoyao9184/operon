@@ -12,7 +12,7 @@ import { IndexedTask } from '../types/fields';
 import { resolveWorkflowStatus } from '../types/pipeline';
 import { localToday } from '../core/local-time';
 import { getConfiguredKeyMappingIcon } from '../core/key-mapping-icons';
-import { getFallbackStateIcon, INLINE_TASK_COMPACT_FALLBACK_ICONS, InlineTaskCompactChipKey, OperonSettings, TaskFinderDefaultScopeItem } from '../types/settings';
+import { INLINE_TASK_COMPACT_FALLBACK_ICONS, InlineTaskCompactChipKey, OperonSettings, resolveTaskDisplayIcon, TaskFinderDefaultScopeItem } from '../types/settings';
 import {
 	buildInlineTaskCompactChipEntries,
 	createInlineTaskCompactChipElement,
@@ -904,15 +904,13 @@ export class TaskFinderModal extends Modal {
 	}
 
 	private renderTaskIcon(container: HTMLElement, task: IndexedTask): void {
-		const iconName = task.fieldValues['taskIcon']?.trim();
-		if (iconName) {
-			const icon = getIcon(iconName);
-			if (icon) {
-				container.appendChild(icon);
-				return;
-			}
+		const iconName = resolveTaskDisplayIcon(this.getSettings(), task.fieldValues, task.checkbox);
+		const icon = getIcon(iconName);
+		if (icon) {
+			container.appendChild(icon);
+			return;
 		}
-		setIcon(container, getFallbackStateIcon(this.getSettings(), task.checkbox));
+		setIcon(container, iconName);
 	}
 
 	private renderTaskChips(container: HTMLElement, task: IndexedTask): void {

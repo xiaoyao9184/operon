@@ -3,7 +3,7 @@
  * Based on Spec Sections 5.4.6 - 5.4.7.
  */
 
-import { clonePipeline, createPipelineId, createStatusId, Pipeline, DEFAULT_PIPELINES, StatusDefinition } from './pipeline';
+import { clonePipeline, createPipelineId, createStatusId, findStatusDef, Pipeline, DEFAULT_PIPELINES, StatusDefinition } from './pipeline';
 import { PriorityDefinition, DEFAULT_PRIORITIES, clonePriorityDefinition, createPriorityId } from './priority';
 import { CANONICAL_KEYS } from './keys';
 import {
@@ -46,8 +46,10 @@ import {
 	sanitizeExcludedFoldersForFileTasksFolder,
 } from '../core/settings-folder-rules';
 
-export const CURRENT_SETTINGS_VERSION = 75;
+export const CURRENT_SETTINGS_VERSION = 77;
 export const CURRENT_TASK_STATS_BACKFILL_VERSION = 1;
+
+export type FallbackTaskIconSource = 'pipelineStatusIcon' | 'priorityIcon' | 'stateIcon';
 
 const DEFAULT_CALENDAR_DEFAULT_PRESET_ID = 'calendar-preset-3day';
 const DEFAULT_KANBAN_DEFAULT_PRESET_ID = 'kanban-preset-default';
@@ -605,6 +607,14 @@ const DEFAULT_KEY_MAPPING_ICONS: Record<string, string> = {
 	datetimeModified: 'file-cog',
 };
 
+// Retired canonical keys stay readable through legacy parsers, but must not
+// participate in active key-mapping generation, migration, or visibility rules.
+const RETIRED_KEY_MAPPING_KEYS = new Set<string>(['related']);
+
+export function isRetiredKeyMapping(canonicalKey: string): boolean {
+	return RETIRED_KEY_MAPPING_KEYS.has(canonicalKey);
+}
+
 function getDefaultKeyMappingIcon(canonicalKey: string): string {
 	return normalizeTaskIconValue(DEFAULT_KEY_MAPPING_ICONS[canonicalKey] ?? '');
 }
@@ -619,17 +629,19 @@ function getDefaultKeyMappingVisibleName(canonicalKey: string): string {
 
 /** Generate default key mappings from all canonical keys */
 function buildDefaultKeyMappings(): KeyMapping[] {
-	return CANONICAL_KEYS.map(k => ({
-		canonicalKey: k.name,
-		visiblePropertyName: getDefaultKeyMappingVisibleName(k.name),
-		type: k.type,
-		sync: k.sync,
-		enabled: true,
-		hideInFileTaskView: k.internal === true,
-		icon: getDefaultKeyMappingIcon(k.name),
-		isSystem: true,
-		isInternal: k.internal === true,
-	}));
+	return CANONICAL_KEYS
+		.filter(k => !isRetiredKeyMapping(k.name))
+		.map(k => ({
+			canonicalKey: k.name,
+			visiblePropertyName: getDefaultKeyMappingVisibleName(k.name),
+			type: k.type,
+			sync: k.sync,
+			enabled: true,
+			hideInFileTaskView: k.internal === true,
+			icon: getDefaultKeyMappingIcon(k.name),
+			isSystem: true,
+			isInternal: k.internal === true,
+		}));
 }
 
 /** Complete Operon settings interface (v1) */
@@ -842,6 +854,7 @@ export interface OperonSettings {
 	inlineExpandedTaskChips: InlineExpandedTaskChips;
 	/** Whether subtask lists are expanded by default */
 	taskBarSubtasksDefaultExpanded: boolean;
+	fallbackTaskIconSource: FallbackTaskIconSource;
 	fallbackStateIcons: {
 		open: string;
 		done: string;
@@ -1150,6 +1163,7 @@ export const DEFAULT_SETTINGS: OperonSettings = {
 
 	inlineExpandedTaskChips: { ...DEFAULT_INLINE_EXPANDED_TASK_CHIPS },
 	taskBarSubtasksDefaultExpanded: true,
+	fallbackTaskIconSource: 'pipelineStatusIcon',
 	fallbackStateIcons: {
 		open: 'obsidian',
 		done: 'circle-check-big',
@@ -1681,12 +1695,19 @@ function normalizePriorityDefinition(raw: unknown, index: number): PriorityDefin
 	const label = normalizeOptionalString(src.label);
 	const color = normalizeOptionalString(src.color);
 	if (!label || !color) return null;
+	const priorityIcon = normalizeTaskIconValue(
+		typeof src.priorityIcon === 'string' ? src.priorityIcon : '',
+	);
 
-	return {
+	const priority: PriorityDefinition = {
 		id: normalizeOptionalString(src.id) ?? createLegacyPriorityId(label, index),
 		label,
 		color,
 	};
+	if (priorityIcon) {
+		priority.priorityIcon = priorityIcon;
+	}
+	return priority;
 }
 
 function normalizePriorityIds(priorities: PriorityDefinition[]): PriorityDefinition[] {
@@ -1712,8 +1733,11 @@ function normalizePipelineStatusDefinition(raw: unknown): StatusDefinition | nul
 	const label = normalizeOptionalString(src.label);
 	const color = normalizeOptionalString(src.color);
 	if (!label || !color) return null;
+	const pipelineStatusIcon = normalizeTaskIconValue(
+		typeof src.pipelineStatusIcon === 'string' ? src.pipelineStatusIcon : '',
+	);
 
-	return {
+	const status: StatusDefinition = {
 		id: normalizeOptionalString(src.id) ?? createStatusId(),
 		label,
 		color,
@@ -1723,6 +1747,10 @@ function normalizePipelineStatusDefinition(raw: unknown): StatusDefinition | nul
 		isTrackingTarget: src.isTrackingTarget === true,
 		propertyMapping: typeof src.propertyMapping === 'string' ? src.propertyMapping : null,
 	};
+	if (pipelineStatusIcon) {
+		status.pipelineStatusIcon = pipelineStatusIcon;
+	}
+	return status;
 }
 
 function normalizePipelineStatuses(statuses: StatusDefinition[]): StatusDefinition[] {
@@ -2009,6 +2037,10 @@ function normalizeTaskStatsBackfillVersion(raw: unknown): number {
 	return Math.max(0, Math.min(CURRENT_TASK_STATS_BACKFILL_VERSION, Math.floor(raw)));
 }
 
+export function normalizeFallbackTaskIconSource(value: unknown): FallbackTaskIconSource {
+	return value === 'stateIcon' || value === 'priorityIcon' ? value : 'pipelineStatusIcon';
+}
+
 /**
  * Migrate and normalize raw settings data to current schema version.
  * Handles missing keys, invalid types, and out-of-range values.
@@ -2093,9 +2125,10 @@ export function migrateSettings(raw: unknown): OperonSettings {
 					DEFAULT_SETTINGS.flowTimeDefaultSessionMinutes,
 				);
 
-			out.inlineExpandedTaskChips = normalizeInlineExpandedTaskChips(
+	out.inlineExpandedTaskChips = normalizeInlineExpandedTaskChips(
 		src.inlineExpandedTaskChips ?? src.taskBarChips,
 	);
+	out.fallbackTaskIconSource = normalizeFallbackTaskIconSource(src.fallbackTaskIconSource);
 
 	if (src.fallbackStateIcons && typeof src.fallbackStateIcons === 'object' && !Array.isArray(src.fallbackStateIcons)) {
 		const saved = src.fallbackStateIcons as Record<string, unknown>;
@@ -2383,16 +2416,18 @@ export function migrateSettings(raw: unknown): OperonSettings {
 				mapping.isInternal = canonical?.internal === true;
 			}
 		}
-		// Prune stale system keys that no longer exist in CANONICAL_KEYS
-		// (e.g. 'icon' and 'color' were renamed to 'taskIcon' and 'taskColor')
+		// Prune retired mappings from every origin, plus stale system keys that no
+		// longer exist in CANONICAL_KEYS (e.g. 'icon' and 'color' were renamed).
 		out.keyMappings = out.keyMappings.filter(m =>
-			!m.isSystem || CANONICAL_KEYS.some(k => k.name === m.canonicalKey)
+			!isRetiredKeyMapping(m.canonicalKey)
+			&& (!m.isSystem || CANONICAL_KEYS.some(k => k.name === m.canonicalKey))
 		);
 		out.keyMappings = out.keyMappings.filter((mapping, index, list) =>
 			list.findIndex(candidate => candidate.canonicalKey === mapping.canonicalKey) === index
 		);
 		// Add any new canonical keys not yet in mappings
 		for (const k of CANONICAL_KEYS) {
+			if (isRetiredKeyMapping(k.name)) continue;
 			if (!out.keyMappings.some(m => m.canonicalKey === k.name)) {
 				out.keyMappings.push({
 					canonicalKey: k.name,
@@ -2700,4 +2735,29 @@ export function getFallbackStateIcon(
 	if (checkbox === 'done') return normalizeTaskIconValue(settings.fallbackStateIcons.done);
 	if (checkbox === 'cancelled') return normalizeTaskIconValue(settings.fallbackStateIcons.cancelled);
 	return normalizeTaskIconValue(settings.fallbackStateIcons.open);
+}
+
+export function resolveTaskDisplayIcon(
+	settings: Pick<OperonSettings, 'fallbackStateIcons' | 'fallbackTaskIconSource' | 'pipelines' | 'priorities'>,
+	fieldValues: Record<string, string | undefined>,
+	checkbox: string,
+): string {
+	const taskIcon = normalizeTaskIconValue(fieldValues['taskIcon']);
+	if (taskIcon) return taskIcon;
+
+	if (settings.fallbackTaskIconSource === 'pipelineStatusIcon') {
+		const pipelineStatusIcon = normalizeTaskIconValue(
+			findStatusDef(settings.pipelines, fieldValues['status'] ?? '')?.pipelineStatusIcon,
+		);
+		if (pipelineStatusIcon) return pipelineStatusIcon;
+	}
+
+	if (settings.fallbackTaskIconSource === 'priorityIcon') {
+		const priorityIcon = normalizeTaskIconValue(
+			settings.priorities.find(priority => priority.label === fieldValues['priority'])?.priorityIcon,
+		);
+		if (priorityIcon) return priorityIcon;
+	}
+
+	return getFallbackStateIcon(settings, checkbox);
 }

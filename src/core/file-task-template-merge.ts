@@ -1,5 +1,5 @@
 import { CANONICAL_KEY_MAP, CANONICAL_KEY_ORDER } from '../types/keys';
-import { KeyMapping } from '../types/settings';
+import { isRetiredKeyMapping, KeyMapping } from '../types/settings';
 import { buildForwardMapping, buildReverseMapping } from './yaml-fields';
 import { ResolvedFileTaskDefaults } from './file-task-defaults';
 import { formatTaskColorYamlValue, normalizeTaskColorValue } from './task-color-value';
@@ -277,7 +277,12 @@ function parseSection(
 		};
 	}
 
-	const canonicalKey = reverseMap.get(section.yamlKey) ?? (CANONICAL_KEY_MAP.has(section.yamlKey) ? section.yamlKey : null);
+	const mappedKey = reverseMap.get(section.yamlKey);
+	const canonicalKey = mappedKey
+		? (isRetiredKeyMapping(mappedKey) ? null : mappedKey)
+		: CANONICAL_KEY_MAP.has(section.yamlKey) && !isRetiredKeyMapping(section.yamlKey)
+			? section.yamlKey
+			: null;
 	if (!canonicalKey) {
 		return {
 			parsed: {

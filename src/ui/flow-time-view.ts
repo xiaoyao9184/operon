@@ -15,7 +15,7 @@ import {
 	normalizeOptimisticFieldValues,
 } from '../systems/optimistic-status-patch';
 import { IndexedTask } from '../types/fields';
-import { OperonSettings, FlowTimeMode, getFallbackStateIcon } from '../types/settings';
+import { OperonSettings, FlowTimeMode, resolveTaskDisplayIcon } from '../types/settings';
 import { parseStatusValue, Pipeline } from '../types/pipeline';
 import { ActiveTrackerState, TrackerSource, TrackerStopReason } from '../types/tracker';
 import { promptTaskFinderSelection, TASK_FINDER_SCOPE_TIME_TRACKER } from './task-finder-integrations';
@@ -158,6 +158,12 @@ export class FlowTimeView extends ItemView {
 				String(settings.flowTimeDefaultSessionMinutes),
 				String(settings.flowTimeShowNumericTimer),
 				String(settings.flowTimeNotifyOnTargetReached),
+				settings.fallbackTaskIconSource,
+				`${settings.fallbackStateIcons.open}:${settings.fallbackStateIcons.done}:${settings.fallbackStateIcons.cancelled}`,
+				settings.pipelines.map(pipeline =>
+					`${pipeline.name}:${pipeline.statuses.map(status => `${status.label}:${status.pipelineStatusIcon ?? ''}`).join(',')}`
+				).join('|'),
+				settings.priorities.map(priority => `${priority.label}:${priority.priorityIcon ?? ''}`).join(','),
 			],
 			activeKey,
 			breakKey,
@@ -1076,8 +1082,7 @@ export class FlowTimeView extends ItemView {
 			container.style.removeProperty('--operon-flow-time-task-status-color');
 		}
 
-		const iconName = task.fieldValues['taskIcon'];
-		setIcon(container, iconName || getFallbackStateIcon(this.callbacks.getSettings(), task.checkbox));
+		setIcon(container, resolveTaskDisplayIcon(this.callbacks.getSettings(), task.fieldValues, task.checkbox));
 	}
 
 	private bindTaskContextMenu(anchor: HTMLElement, task: IndexedTask): void {

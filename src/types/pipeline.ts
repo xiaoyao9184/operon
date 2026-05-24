@@ -13,6 +13,8 @@ export interface StatusDefinition {
 	label: string;
 	/** Primary color for status display (hex) */
 	color: string;
+	/** Optional icon used by pipeline-aware task icon displays */
+	pipelineStatusIcon?: string;
 	/** Whether this status is a terminal "finished" state */
 	isFinished: boolean;
 	/** Whether this status is a terminal "cancelled" state */

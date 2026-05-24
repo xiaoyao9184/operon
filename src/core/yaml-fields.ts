@@ -8,7 +8,7 @@
 
 import { App, TFile } from 'obsidian';
 import { CANONICAL_KEY_MAP } from '../types/keys';
-import { KeyMapping } from '../types/settings';
+import { isRetiredKeyMapping, KeyMapping } from '../types/settings';
 import { normalizeTaskIconValue } from './task-icon-value';
 import { formatTaskColorYamlValue, normalizeTaskColorValue } from './task-color-value';
 
@@ -30,6 +30,7 @@ export function getVisiblePropertyName(
 	keyMappings: KeyMapping[],
 ): string {
 	for (const mapping of keyMappings) {
+		if (isRetiredKeyMapping(mapping.canonicalKey)) continue;
 		if (mapping.canonicalKey !== canonicalKey) continue;
 		if (!mapping.visiblePropertyName) continue;
 		return mapping.visiblePropertyName;
@@ -52,6 +53,7 @@ export function isManagedYamlCanonicalKey(
 	canonicalKey: string,
 	keyMappings: KeyMapping[],
 ): boolean {
+	if (isRetiredKeyMapping(canonicalKey)) return false;
 	if (CANONICAL_KEY_MAP.has(canonicalKey)) return true;
 	return keyMappings.some(mapping => mapping.canonicalKey === canonicalKey);
 }
@@ -167,6 +169,7 @@ export function inlineToYamlValue(
 export function buildForwardMapping(mappings: KeyMapping[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const m of mappings) {
+		if (isRetiredKeyMapping(m.canonicalKey)) continue;
 		if (m.visiblePropertyName) {
 			map.set(m.canonicalKey, m.visiblePropertyName);
 		}
@@ -181,6 +184,7 @@ export function buildForwardMapping(mappings: KeyMapping[]): Map<string, string>
 export function buildReverseMapping(mappings: KeyMapping[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const m of mappings) {
+		if (isRetiredKeyMapping(m.canonicalKey)) continue;
 		if (m.visiblePropertyName) {
 			map.set(m.visiblePropertyName, m.canonicalKey);
 		}

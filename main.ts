@@ -109,7 +109,8 @@ import {
 	setWindowTimeout,
 } from './src/core/dom-compat';
 import { asyncHandler, runAsyncAction } from './src/core/async-action';
-import { getAppLocale, getCommunityPlugin } from './src/core/obsidian-app';
+import { getAppLocale, getCommunityPlugin, isDailyNotesCoreAvailable } from './src/core/obsidian-app';
+import { InlineTaskSaveMode, resolveEffectiveInlineTaskSaveMode } from './src/core/inline-task-save-mode';
 import { isRecord, isUnknownFunction, readString } from './src/core/unknown-value';
 import {
 	buildTaskCreationNotices,
@@ -261,9 +262,6 @@ import {
 	isExpandedAllDayRange,
 	resolveCalendarInlineHeading,
 } from './src/systems/calendar-writeback';
-import {
-	isDailyNotesCoreAvailable,
-} from './src/ui/calendar/calendar-modal-helpers';
 import { CalendarSlotActionId, SlotActionModal } from './src/ui/calendar/slot-action-modal';
 import { CalendarPresetQuickSettingsModal } from './src/ui/calendar/calendar-preset-quick-settings-modal';
 import { buildRepeatScopeModalLabels, promptRepeatOccurrenceScope } from './src/ui/calendar/repeat-occurrence-scope-modal';
@@ -320,6 +318,11 @@ interface OpenTaskCreatorOptions {
 	submitMode?: TaskCreatorSubmitMode;
 	onSubmitInline?: (draft: TaskCreatorDraft) => Promise<boolean> | boolean;
 	onSubmitFile?: (draft: TaskCreatorDraft) => Promise<boolean> | boolean;
+}
+
+interface TaskCreatorInlineCreationOptions {
+	targetDateKey?: string | null;
+	parentAwarePlacement?: boolean;
 }
 
 interface ProjectedCalendarOccurrenceRef {
@@ -2517,8 +2520,14 @@ export default class OperonPlugin extends Plugin {
 		});
 	}
 
+	private resolveEffectiveInlineTaskSaveMode(): InlineTaskSaveMode {
+		return resolveEffectiveInlineTaskSaveMode(this.settings, isDailyNotesCoreAvailable(this.app));
+	}
+
 	private getCalendarInlineTaskAvailability(): { enabled: boolean; reason?: string } {
-		if (isDailyNotesCoreAvailable(this.app)) {
+		const dailyNotesAvailable = isDailyNotesCoreAvailable(this.app);
+		const saveMode = this.resolveEffectiveInlineTaskSaveMode();
+		if (saveMode === 'specific-file' || dailyNotesAvailable) {
 			return { enabled: true };
 		}
 		return {
@@ -2571,10 +2580,9 @@ export default class OperonPlugin extends Plugin {
 	}
 
 	private getKanbanInlineTaskAvailability(): { enabled: boolean; reason?: string } {
-		if (!this.settings.inlineTaskUseDailyNote) {
-			return { enabled: true };
-		}
-		if (isDailyNotesCoreAvailable(this.app)) {
+		const dailyNotesAvailable = isDailyNotesCoreAvailable(this.app);
+		const saveMode = this.resolveEffectiveInlineTaskSaveMode();
+		if (saveMode === 'specific-file' || dailyNotesAvailable) {
 			return { enabled: true };
 		}
 		return {
@@ -2898,7 +2906,7 @@ export default class OperonPlugin extends Plugin {
 			onSubmitInline: (nextDraft) => this.createCalendarInlineTaskFromCreatorDraft(leaf, selection, nextDraft),
 		});
 		if (!initialDraft) {
-			this.queueCalendarDailyNoteParentSeedBackgroundEnsure(selection.startDate);
+			this.queueCalendarDailyNoteParentSeedBackgroundEnsure(selection.startDate, submitMode);
 		}
 	}
 
@@ -2906,6 +2914,7 @@ export default class OperonPlugin extends Plugin {
 		selection: CalendarSlotSelection,
 		draft: TaskCreatorDraft,
 	): Promise<TaskCreatorDraft> {
+		if (!isDailyNotesCoreAvailable(this.app)) return draft;
 		if ((draft.fieldValues['parentTask'] ?? '').trim()) return draft;
 		if (isTaskCreatorFieldExplicitlyCleared(draft, 'parentTask')) return draft;
 		const parentSeed = await this.getCalendarDailyNoteParentSeedPromise(selection.startDate);
@@ -2913,9 +2922,11 @@ export default class OperonPlugin extends Plugin {
 		return applyTaskCreatorParentSeedToDraft(cloneTaskCreatorDraft(draft), parentSeed, this.settings);
 	}
 
-	private queueCalendarDailyNoteParentSeedBackgroundEnsure(dateKey: string): void {
+	private queueCalendarDailyNoteParentSeedBackgroundEnsure(dateKey: string, submitMode: TaskCreatorSubmitMode): void {
 		const normalizedDateKey = dateKey.trim();
 		if (!normalizedDateKey || !this.settings.createDailyNotesAsOperonTask) return;
+		if (!isDailyNotesCoreAvailable(this.app)) return;
+		if (submitMode === 'inline-only' && this.resolveEffectiveInlineTaskSaveMode() !== 'daily-notes') return;
 		const modal = this.taskCreatorModal;
 		setWindowTimeout(() => {
 			void this.getCalendarDailyNoteParentSeedPromise(normalizedDateKey)
@@ -2958,6 +2969,7 @@ export default class OperonPlugin extends Plugin {
 
 	private async resolveCalendarDailyNoteTaskCreatorParentSeed(dateKey: string): Promise<TaskCreatorParentSeed | null> {
 		if (!this.settings.createDailyNotesAsOperonTask) return null;
+		if (!isDailyNotesCoreAvailable(this.app)) return null;
 
 		try {
 			const dailyNote = await this.resolveOrCreateCalendarDailyNoteResult(dateKey);
@@ -3049,9 +3061,17 @@ export default class OperonPlugin extends Plugin {
 		selection: CalendarSlotSelection,
 		draft: TaskCreatorDraft,
 	): Promise<boolean> {
-		if (!isDailyNotesCoreAvailable(this.app)) {
-			new Notice(t('notifications', 'dailyNoteUnavailable'));
-			return false;
+		if (this.resolveEffectiveInlineTaskSaveMode() === 'specific-file') {
+			const created = await this.createInlineTaskFromCreatorDraftResult(draft, {
+				targetDateKey: selection.startDate,
+				parentAwarePlacement: false,
+			});
+			if (!created) return false;
+			this.maybeNoticeCalendarCreatorFilterMismatch(
+				leaf,
+				this.getCreatedInlineTaskFilterDraft(created.operonId, draft, 'open'),
+			);
+			return true;
 		}
 
 		const parentTaskExplicitlyCleared = isTaskCreatorFieldExplicitlyCleared(draft, 'parentTask');
@@ -7913,18 +7933,15 @@ export default class OperonPlugin extends Plugin {
 		});
 	}
 
-	private async resolveTaskCreatorInlineTargetFile(): Promise<{
+	private async resolveTaskCreatorInlineTargetFile(options: { targetDateKey?: string | null } = {}): Promise<{
 		file: TFile | null;
 		fallbackParentTaskId: string | null;
 		fallbackParentFieldValues: Record<string, string> | null;
 		dailyDateHeading?: string | null;
 	}> {
-		if (this.settings.inlineTaskUseDailyNote) {
-			if (!isDailyNotesCoreAvailable(this.app)) {
-				new Notice(t('notifications', 'dailyNoteUnavailable'));
-				return { file: null, fallbackParentTaskId: null, fallbackParentFieldValues: null, dailyDateHeading: null };
-			}
-			const dailyNote = await this.resolveOrCreateCalendarDailyNoteResult(localToday());
+		const targetDateKey = options.targetDateKey?.trim() || localToday();
+		if (this.resolveEffectiveInlineTaskSaveMode() === 'daily-notes') {
+			const dailyNote = await this.resolveOrCreateCalendarDailyNoteResult(targetDateKey);
 			if (!(dailyNote.file instanceof TFile)) {
 				new Notice(t('notifications', 'dailyNoteResolveFailed'));
 				return { file: null, fallbackParentTaskId: null, fallbackParentFieldValues: null, dailyDateHeading: null };
@@ -7947,7 +7964,7 @@ export default class OperonPlugin extends Plugin {
 			file: targetFile,
 			fallbackParentTaskId: null,
 			fallbackParentFieldValues: null,
-			dailyDateHeading: localToday(),
+			dailyDateHeading: targetDateKey,
 		};
 	}
 
@@ -8082,8 +8099,13 @@ export default class OperonPlugin extends Plugin {
 		};
 	}
 
-	private async insertTaskCreatorInlineTaskUsingDefaultTarget(draft: TaskCreatorDraft): Promise<QuickInlineTaskCreationResult | null> {
-		const target = await this.resolveTaskCreatorInlineTargetFile();
+	private async insertTaskCreatorInlineTaskUsingDefaultTarget(
+		draft: TaskCreatorDraft,
+		options: TaskCreatorInlineCreationOptions = {},
+	): Promise<QuickInlineTaskCreationResult | null> {
+		const target = await this.resolveTaskCreatorInlineTargetFile({
+			targetDateKey: options.targetDateKey,
+		});
 		if (!(target.file instanceof TFile)) return null;
 
 		const created = await this.insertTaskCreatorInlineTaskIntoFile(
@@ -8174,31 +8196,44 @@ export default class OperonPlugin extends Plugin {
 		};
 	}
 
-	private async insertTaskCreatorInlineTaskWithResolvedTarget(draft: TaskCreatorDraft): Promise<QuickInlineTaskCreationResult | null> {
-		const placement = resolveTaskCreatorInlinePlacement({
-			draft,
-			settings: this.settings,
-			getTaskById: parentTaskId => this.indexer.getTask(parentTaskId) ?? null,
-		});
-		if (placement.kind === 'below-inline-parent') {
-			const created = await this.insertTaskCreatorInlineTaskBelowInlineParent(draft, placement.parentTask);
-			if (created) return created;
-		}
-
-		if (placement.kind === 'inside-file-parent') {
-			const created = await this.insertTaskCreatorInlineTaskInsideFileParent(
+	private async insertTaskCreatorInlineTaskWithResolvedTarget(
+		draft: TaskCreatorDraft,
+		options: TaskCreatorInlineCreationOptions = {},
+	): Promise<QuickInlineTaskCreationResult | null> {
+		if (options.parentAwarePlacement !== false) {
+			const placement = resolveTaskCreatorInlinePlacement({
 				draft,
-				placement.parentTask,
-				placement.headingKeyword,
-			);
-			if (created) return created;
+				settings: this.settings,
+				getTaskById: parentTaskId => this.indexer.getTask(parentTaskId) ?? null,
+			});
+			if (placement.kind === 'below-inline-parent') {
+				const created = await this.insertTaskCreatorInlineTaskBelowInlineParent(draft, placement.parentTask);
+				if (created) return created;
+			}
+
+			if (placement.kind === 'inside-file-parent') {
+				const created = await this.insertTaskCreatorInlineTaskInsideFileParent(
+					draft,
+					placement.parentTask,
+					placement.headingKeyword,
+				);
+				if (created) return created;
+			}
 		}
 
-		return await this.insertTaskCreatorInlineTaskUsingDefaultTarget(draft);
+		return await this.insertTaskCreatorInlineTaskUsingDefaultTarget(draft, {
+			targetDateKey: options.targetDateKey,
+		});
 	}
 
-	private async createInlineTaskFromCreatorDraftResult(draft: TaskCreatorDraft): Promise<QuickInlineTaskCreationResult | null> {
-		const created = await this.insertTaskCreatorInlineTaskWithResolvedTarget(draft);
+	private async createInlineTaskFromCreatorDraftResult(
+		draft: TaskCreatorDraft,
+		options: TaskCreatorInlineCreationOptions = {},
+	): Promise<QuickInlineTaskCreationResult | null> {
+		const created = await this.insertTaskCreatorInlineTaskWithResolvedTarget(draft, {
+			targetDateKey: options.targetDateKey,
+			parentAwarePlacement: options.parentAwarePlacement,
+		});
 		if (!created) {
 			new Notice(t('notifications', 'inlineTaskCreateFailed'));
 			return null;

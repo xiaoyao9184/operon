@@ -1,6 +1,4 @@
-import { App } from 'obsidian';
 import { t } from '../../core/i18n';
-import { getInternalPlugin, isPluginEnabled } from '../../core/obsidian-app';
 import { CalendarWritebackPlan } from '../../types/calendar';
 import { IndexedTask } from '../../types/fields';
 
@@ -106,8 +104,4 @@ export function buildCalendarReplacementDetails(
 	}
 
 	return rows;
-}
-
-export function isDailyNotesCoreAvailable(app: App): boolean {
-	return isPluginEnabled(getInternalPlugin(app, 'daily-notes'));
 }

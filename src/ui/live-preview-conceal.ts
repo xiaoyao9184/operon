@@ -11,8 +11,7 @@ import { App, editorLivePreviewField, setIcon } from 'obsidian';
 import { createOwnerElement, getOwnerWindow } from '../core/dom-compat';
 import { parseTaskLine } from '../core/parser';
 import { IndexedTask, ParsedTask } from '../types/fields';
-import { OperonSettings } from '../types/settings';
-import { getFallbackStateIcon } from '../types/settings';
+import { OperonSettings, resolveTaskDisplayIcon } from '../types/settings';
 import { Pipeline, parseStatusValue, resolveWorkflowStatus } from '../types/pipeline';
 import { PriorityDefinition } from '../types/priority';
 import { showDatePicker } from './field-pickers/date-picker';
@@ -133,13 +132,8 @@ class TaskIconWidget extends WidgetType {
 		const statusValue = fieldValues['status'];
 		button.setCssProps({ '--operon-live-icon-color': lookupStatusColor(statusValue, this.callbacks.getPipelines()) });
 
-		const iconName = fieldValues['taskIcon'];
-		if (iconName) {
-			setIcon(button, iconName);
-		} else {
-			const checkbox = this.indexedTask?.checkbox ?? this.task.checkbox;
-			setIcon(button, getFallbackStateIcon(this.callbacks.getSettings(), checkbox));
-		}
+		const checkbox = this.indexedTask?.checkbox ?? this.task.checkbox;
+		setIcon(button, resolveTaskDisplayIcon(this.callbacks.getSettings(), fieldValues, checkbox));
 
 		button.addEventListener('click', (event) => {
 			event.preventDefault();
@@ -662,7 +656,7 @@ export function buildTaskIconRenderSignature(
 	const checkbox = indexedTask?.checkbox ?? task.checkbox;
 	return stableStringify({
 		checkbox,
-		iconName: fieldValues['taskIcon'] || getFallbackStateIcon(callbacks.getSettings(), checkbox),
+		iconName: resolveTaskDisplayIcon(callbacks.getSettings(), fieldValues, checkbox),
 		status: fieldValues['status'] ?? '',
 		statusColor: lookupStatusColor(fieldValues['status'], callbacks.getPipelines()),
 	});

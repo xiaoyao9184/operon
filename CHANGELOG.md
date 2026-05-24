@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Validation
 
+## [1.0.4] - 2026-05-24
+
+### New
+- Added optional icons to pipeline statuses, so each workflow state can be prepared with its own visual marker in the pipeline settings.
+- Added a fallback icon source setting for task state icons, allowing tasks without a taskIcon to use pipeline status icons before falling back to Open, Finished, or Cancelled icons.
+- Added optional icons to priorities and a Priority icons fallback source, so tasks without a taskIcon can use priority-specific visuals before falling back to state icons.
+- Added a File Task Migration tool, so existing notes can be converted into Operon file tasks by folder, tag, or property match with a review preview, live conversion progress, stale-scan protection, and a confirmation step.
+
+### Improved
+- Improved File Task settings organization by separating Daily notes from Excluded folders, making the daily-note task toggle read as its own section.
+
+### Fixed
+- Fixed Calendar inline task creation requiring the Daily Notes core plugin, so users who save inline tasks to a Specific File can create calendar tasks even when Daily Notes is disabled.
+- Fixed user-owned `Related` frontmatter being hidden or treated as an Operon key mapping by retiring the unused related task-field mapping.
+
+### Validation
+- Local validation passed `npm run check:local`, including strict linting, production build, release guard, and the full Phase 5 regression suite at 619/619 checks.
+
 ## [1.0.3] - 2026-05-23
 
 ### New

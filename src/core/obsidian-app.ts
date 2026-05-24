@@ -43,3 +43,7 @@ export function getInternalPlugin(app: App, pluginId: string): unknown {
 export function isPluginEnabled(plugin: unknown): boolean {
 	return isRecord(plugin) && plugin.enabled === true;
 }
+
+export function isDailyNotesCoreAvailable(app: App): boolean {
+	return isPluginEnabled(getInternalPlugin(app, 'daily-notes'));
+}

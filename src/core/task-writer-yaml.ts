@@ -1,5 +1,5 @@
 import { CANONICAL_KEY_MAP, TASK_STATS_CANONICAL_KEYS } from '../types/keys';
-import { KeyMapping } from '../types/settings';
+import { isRetiredKeyMapping, KeyMapping } from '../types/settings';
 import { buildForwardMapping, buildReverseMapping, getManagedYamlAliases, isManagedYamlCanonicalKey } from './yaml-fields';
 import { normalizeTaskIconValue } from './task-icon-value';
 import { formatTaskColorYamlValue } from './task-color-value';
@@ -184,7 +184,11 @@ function resolveManagedCanonicalKey(
 	if (yamlKey === 'pinned') {
 		return 'pinned';
 	}
-	return reverseMap.get(yamlKey) ?? (CANONICAL_KEY_MAP.has(yamlKey) ? yamlKey : null);
+	const mappedKey = reverseMap.get(yamlKey);
+	if (mappedKey) {
+		return isRetiredKeyMapping(mappedKey) ? null : mappedKey;
+	}
+	return CANONICAL_KEY_MAP.has(yamlKey) && !isRetiredKeyMapping(yamlKey) ? yamlKey : null;
 }
 
 function buildManagedFieldPayload(

@@ -2,7 +2,7 @@ import { App, FuzzyMatch, FuzzySuggestModal, prepareFuzzySearch, setIcon } from 
 import { t } from '../../core/i18n';
 import { IndexedTask } from '../../types/fields';
 import { Pipeline, parseStatusValue } from '../../types/pipeline';
-import { OperonSettings, getFallbackStateIcon } from '../../types/settings';
+import { OperonSettings, resolveTaskDisplayIcon } from '../../types/settings';
 import {
 	buildTaskPickerSearchText,
 	getCalendarTaskPickerSortRank,
@@ -140,12 +140,6 @@ export class TaskPickerModal extends FuzzySuggestModal<IndexedTask> {
 			}
 		}
 
-		const iconName = task.fieldValues['taskIcon'];
-		if (iconName) {
-			setIcon(container, iconName);
-			return;
-		}
-
-		setIcon(container, getFallbackStateIcon(this.options.getSettings(), task.checkbox));
+		setIcon(container, resolveTaskDisplayIcon(this.options.getSettings(), task.fieldValues, task.checkbox));
 	}
 }
