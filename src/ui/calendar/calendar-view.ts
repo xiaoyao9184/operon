@@ -38,7 +38,7 @@ import {
 	CalendarSlotSelection,
 } from '../../types/calendar';
 import { IndexedTask } from '../../types/fields';
-import { FilterSet, getFallbackStateIcon, INLINE_TASK_COMPACT_FALLBACK_ICONS, OperonSettings } from '../../types/settings';
+import { FilterSet, INLINE_TASK_COMPACT_FALLBACK_ICONS, OperonSettings, resolveTaskDisplayIcon } from '../../types/settings';
 import type { PinnedCache } from '../../storage/pinned-cache';
 import type { RepeatSeriesEntry } from '../../storage/repeat-series-store';
 import {
@@ -4315,18 +4315,12 @@ export class CalendarView extends ItemView {
 		}
 
 		private resolveStatusButtonIcon(
-			fieldValues: Record<string, string>,
-			checkbox: IndexedTask['checkbox'],
-			settings: OperonSettings,
-		): string {
-			const taskIcon = (fieldValues['taskIcon'] ?? '').trim();
-			if (taskIcon) return taskIcon;
-			return checkbox === 'done'
-				? getFallbackStateIcon(settings, 'done')
-				: checkbox === 'cancelled'
-					? getFallbackStateIcon(settings, 'cancelled')
-					: getFallbackStateIcon(settings, checkbox);
-		}
+		fieldValues: Record<string, string>,
+		checkbox: IndexedTask['checkbox'],
+		settings: OperonSettings,
+	): string {
+		return resolveTaskDisplayIcon(settings, fieldValues, checkbox);
+	}
 
 		private resolveCurrentCalendarPreset(settings = this.getSettings()): CalendarPreset | null {
 			const state = this.ensureState();

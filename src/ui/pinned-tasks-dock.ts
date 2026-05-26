@@ -6,7 +6,7 @@
 
 import { Component, Platform, getIcon, setIcon } from 'obsidian';
 import { OperonIndexer } from '../indexer/indexer';
-import { OperonSettings, getFallbackStateIcon } from '../types/settings';
+import { OperonSettings, resolveTaskDisplayIcon } from '../types/settings';
 import { IndexedTask } from '../types/fields';
 import { findStatusDef } from '../types/pipeline';
 import { TimeTracker } from '../systems/time-tracker';
@@ -149,15 +149,17 @@ export class PinnedTasksDock extends Component {
 		const activeTrackerId = this.timeTracker.getActiveOperonId();
 		const colorSettingsSignature = [
 			this.settings.pinnedDockColorSource,
-			this.settings.priorities.map(priority => `${priority.label}:${priority.color}`).join(','),
+			this.settings.priorities.map(priority => `${priority.label}:${priority.color}:${priority.priorityIcon ?? ''}`).join(','),
 			this.settings.pipelines.map(pipeline =>
-				`${pipeline.name}:${pipeline.statuses.map(status => `${status.label}:${status.color}`).join(',')}`
+				`${pipeline.name}:${pipeline.statuses.map(status => `${status.label}:${status.color}:${status.pipelineStatusIcon ?? ''}`).join(',')}`
 			).join('|'),
 		].join('~');
 		const signature = [
 			String(this.indexer.getGeneration()),
 			String(this.pinnedCache.getGeneration()),
 			colorSettingsSignature,
+			this.settings.fallbackTaskIconSource,
+			`${this.settings.fallbackStateIcons.open}:${this.settings.fallbackStateIcons.done}:${this.settings.fallbackStateIcons.cancelled}`,
 			activeTrackerId ?? '',
 			pinnedTasks.map(task =>
 				`${task.operonId}:${task.description}:${task.fieldValues['taskIcon'] ?? ''}:${task.fieldValues['taskColor'] ?? ''}:${task.fieldValues['status'] ?? ''}:${task.fieldValues['priority'] ?? ''}:${task.checkbox}`
@@ -312,19 +314,7 @@ export class PinnedTasksDock extends Component {
 	}
 
 	private renderStatusIcon(btn: HTMLElement, task: IndexedTask): void {
-		const iconName = task.fieldValues['taskIcon'];
-		const isDone = task.checkbox === 'done';
-		const isCancelled = task.checkbox === 'cancelled';
-
-		if (isDone) {
-			setIcon(btn, getFallbackStateIcon(this.settings, 'done'));
-		} else if (isCancelled) {
-			setIcon(btn, getFallbackStateIcon(this.settings, 'cancelled'));
-		} else if (iconName) {
-			setIcon(btn, iconName);
-		} else {
-			setIcon(btn, getFallbackStateIcon(this.settings, task.checkbox));
-		}
+		setIcon(btn, resolveTaskDisplayIcon(this.settings, task.fieldValues, task.checkbox));
 	}
 
 	private lookupStatusColor(statusValue: string | undefined): string {

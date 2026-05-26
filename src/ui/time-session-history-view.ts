@@ -2,7 +2,7 @@ import { ItemView, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
 import { OperonIndexer } from '../indexer/indexer';
 import { TimeTracker } from '../systems/time-tracker';
 import { TrackerHistoryDayGroup, TrackerSession, TrackerSource } from '../types/tracker';
-import { OperonSettings, getFallbackStateIcon } from '../types/settings';
+import { OperonSettings, resolveTaskDisplayIcon } from '../types/settings';
 import { formatDurationHuman } from '../systems/tracker-utils';
 import { parseStatusValue } from '../types/pipeline';
 import { TrackerSessionEditModal } from './tracker-session-edit-modal';
@@ -105,6 +105,12 @@ export class TimeSessionHistoryView extends ItemView {
 			String(settings.trackerHistoryDays),
 			settings.trackerTaskDescriptionClickAction,
 			settings.timeFormat,
+			settings.fallbackTaskIconSource,
+			`${settings.fallbackStateIcons.open}:${settings.fallbackStateIcons.done}:${settings.fallbackStateIcons.cancelled}`,
+			settings.pipelines.map(pipeline =>
+				`${pipeline.name}:${pipeline.statuses.map(status => `${status.label}:${status.color}:${status.pipelineStatusIcon ?? ''}`).join(',')}`
+			).join('|'),
+			settings.priorities.map(priority => `${priority.label}:${priority.priorityIcon ?? ''}`).join(','),
 		].join(':');
 		const signature = [String(this.indexer.getGeneration()), historyKey, settingsKey].join('§');
 
@@ -311,12 +317,7 @@ export class TimeSessionHistoryView extends ItemView {
 			}
 		}
 
-		const iconName = task.fieldValues['taskIcon'];
-		if (iconName) {
-			setIcon(container, iconName);
-			return;
-		}
-		setIcon(container, getFallbackStateIcon(this.callbacks.getSettings(), task.checkbox));
+		setIcon(container, resolveTaskDisplayIcon(this.callbacks.getSettings(), task.fieldValues, task.checkbox));
 	}
 
 	private applyTaskColorBorder(container: HTMLElement, task: import('../types/fields').IndexedTask): void {

@@ -4,7 +4,7 @@ import { showDatePicker } from './field-pickers/date-picker';
 import { showPriorityPicker } from './field-pickers/priority-picker';
 import { showEstimatePicker } from './field-pickers/estimate-picker';
 import { showLivePreviewFieldMenu } from './live-preview-field-menu';
-import { InlineTaskCompactChipItem, OperonSettings, getFallbackStateIcon } from '../types/settings';
+import { InlineTaskCompactChipItem, OperonSettings, resolveTaskDisplayIcon } from '../types/settings';
 import { Pipeline, parseStatusValue, resolveWorkflowStatus } from '../types/pipeline';
 import { PriorityDefinition } from '../types/priority';
 import {
@@ -451,12 +451,7 @@ function renderTaskIcon(
 	task: IndexedTask,
 	callbacks: ReadingTaskRowCallbacks,
 ): void {
-	const iconName = task.fieldValues['taskIcon'];
-	if (iconName) {
-		setIcon(container, iconName);
-		return;
-	}
-	setIcon(container, getFallbackStateIcon(callbacks.getSettings(), task.checkbox));
+	setIcon(container, resolveTaskDisplayIcon(callbacks.getSettings(), task.fieldValues, task.checkbox));
 }
 
 function runReadingRowStatusCycle(callbacks: ReadingTaskRowCallbacks, operonId: string): void {

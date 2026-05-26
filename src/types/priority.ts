@@ -10,6 +10,8 @@ export interface PriorityDefinition {
 	label: string;
 	/** Display color for priority chips (hex) */
 	color: string;
+	/** Optional icon used by priority-aware task icon displays */
+	priorityIcon?: string;
 }
 
 export function createPriorityId(): string {

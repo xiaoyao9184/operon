@@ -1,7 +1,7 @@
 import { App, TFile, parseLinktext } from 'obsidian';
 import { DescendantTaskSummary } from '../indexer/indexer';
 import { IndexedTask } from '../types/fields';
-import { OperonSettings, getFallbackStateIcon } from '../types/settings';
+import { OperonSettings, resolveTaskDisplayIcon } from '../types/settings';
 import { Pipeline, parseStatusValue } from '../types/pipeline';
 
 export interface ResolvedTaskFileLink {
@@ -79,7 +79,7 @@ export function computeTaskFileLinkVisuals(
 	return {
 		hoverColor: normalizeTaskColor(task.fieldValues['taskColor']) ?? 'var(--interactive-accent)',
 		statusColor: lookupStatusColor(task.fieldValues['status'], pipelines),
-		iconName: task.fieldValues['taskIcon'] || getFallbackStateIcon(settings, task.checkbox),
+		iconName: resolveTaskDisplayIcon(settings, task.fieldValues, task.checkbox),
 		labelState: getTaskFileLinkLabelState(task),
 	};
 }

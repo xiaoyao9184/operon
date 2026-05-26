@@ -22,8 +22,8 @@ import { resolveContextualHoverMenuPosition } from '../contextual-hover-menu-pos
 import { findStatusDef, Pipeline } from '../../types/pipeline';
 import {
 	FilterSet,
-	getFallbackStateIcon,
 	OperonSettings,
+	resolveTaskDisplayIcon,
 	TASK_FINDER_DEFAULT_SCOPE_ICONS,
 	TaskFinderDefaultScopeKey,
 } from '../../types/settings';
@@ -329,6 +329,7 @@ export class KanbanView extends ItemView {
 			pipelines: settings.pipelines,
 			filterSet,
 			priorities: settings.priorities,
+			fallbackTaskIconSource: settings.fallbackTaskIconSource,
 			fallbackStateIcons: settings.fallbackStateIcons,
 			maxVisibleTasksPerCell: settings.kanbanMaxVisibleTasksPerCell,
 			taskFinderShortcuts: settings.taskFinderShortcuts,
@@ -1586,14 +1587,7 @@ export class KanbanView extends ItemView {
 					type: 'button',
 				},
 			});
-		const taskIcon = (task.fieldValues['taskIcon'] ?? '').trim();
-		const iconName = taskIcon || (
-			task.checkbox === 'done'
-				? getFallbackStateIcon(this.getSettings(), 'done')
-				: task.checkbox === 'cancelled'
-					? getFallbackStateIcon(this.getSettings(), 'cancelled')
-					: getFallbackStateIcon(this.getSettings(), task.checkbox)
-		);
+		const iconName = resolveTaskDisplayIcon(this.getSettings(), task.fieldValues, task.checkbox);
 			if (iconName) {
 				setIcon(button, iconName);
 			}

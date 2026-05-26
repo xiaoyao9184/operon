@@ -29,7 +29,7 @@ import { parseTaskLine } from '../core/parser';
 import { ParsedTask, IndexedTask } from '../types/fields';
 import { Pipeline, parseStatusValue } from '../types/pipeline';
 import { PriorityDefinition } from '../types/priority';
-import { OperonSettings, getFallbackStateIcon } from '../types/settings';
+import { OperonSettings, resolveTaskDisplayIcon } from '../types/settings';
 import { t } from '../core/i18n';
 import { localToday } from '../core/local-time';
 import { showDatePicker as showSharedDatePicker } from './field-pickers/date-picker';
@@ -198,23 +198,13 @@ function renderSubtaskList(container: HTMLElement, childIds: string[], cbs: Task
 function renderIconButtonFromIndex(container: HTMLElement, task: IndexedTask, cbs: TaskBarCallbacks): void {
 	const statusValue = task.fieldValues['status'];
 	const iconName = resolveInheritedFieldFromIndex(task, 'taskIcon', cbs.getIndexedTask);
-	const isDone = task.checkbox === 'done';
-	const isCancelled = task.checkbox === 'cancelled';
+	const fieldValues = iconName ? { ...task.fieldValues, taskIcon: iconName } : task.fieldValues;
 
 	const statusColor = lookupStatusColorFromIndex(statusValue, cbs.getPipelines());
 
 	const cb = el('button', `operon-checkbox operon-checkbox-${task.checkbox}`);
 	cb.style.color = statusColor;
-
-	if (isDone) {
-		setIcon(cb, getFallbackStateIcon(cbs.getSettings(), 'done'));
-	} else if (isCancelled) {
-		setIcon(cb, getFallbackStateIcon(cbs.getSettings(), 'cancelled'));
-	} else if (iconName) {
-		setIcon(cb, iconName);
-	} else {
-		setIcon(cb, getFallbackStateIcon(cbs.getSettings(), task.checkbox));
-	}
+	setIcon(cb, resolveTaskDisplayIcon(cbs.getSettings(), fieldValues, task.checkbox));
 
 	cb.addEventListener('click', (e) => {
 		e.stopPropagation();
@@ -540,6 +530,7 @@ class TaskBarWidget extends WidgetType {
 	private task: ParsedTask;
 	private indexedTask: IndexedTask | undefined;
 	private subtreeSignature = '';
+	private settingsIconSignature = '';
 	private getIndexedTask: (id: string) => IndexedTask | undefined;
 	private openEditor: (task: ParsedTask) => void;
 	private toggleCheckbox: (task: ParsedTask, view: EditorView) => void;
@@ -577,6 +568,7 @@ class TaskBarWidget extends WidgetType {
 			this.indexedTask = getIndexedTask(task.operonId);
 		}
 		this.subtreeSignature = this.computeSubtreeSignature(this.indexedTask?.operonId ?? task.operonId);
+		this.settingsIconSignature = this.computeSettingsIconSignature();
 	}
 
 	toDOM(view: EditorView): HTMLElement {
@@ -687,14 +679,8 @@ class TaskBarWidget extends WidgetType {
 	private renderMinimalCheckbox(container: HTMLElement, view: EditorView): void {
 		const cb = el('button', `operon-checkbox operon-checkbox-${this.task.checkbox}`);
 		const settings = this.getSettings();
-
-		if (this.task.checkbox === 'done') {
-			setIcon(cb, getFallbackStateIcon(settings, 'done'));
-		} else if (this.task.checkbox === 'cancelled') {
-			setIcon(cb, getFallbackStateIcon(settings, 'cancelled'));
-		} else {
-			setIcon(cb, getFallbackStateIcon(settings, this.task.checkbox));
-		}
+		const fieldValues = Object.fromEntries(this.task.fields.map(field => [field.key, field.value]));
+		setIcon(cb, resolveTaskDisplayIcon(settings, fieldValues, this.task.checkbox));
 
 		cb.addEventListener('click', (e) => {
 			e.stopPropagation();
@@ -755,8 +741,21 @@ class TaskBarWidget extends WidgetType {
 		return parts.join('||');
 	}
 
+	private computeSettingsIconSignature(): string {
+		const settings = this.getSettings();
+		return [
+			settings.fallbackTaskIconSource,
+			`${settings.fallbackStateIcons.open}:${settings.fallbackStateIcons.done}:${settings.fallbackStateIcons.cancelled}`,
+			settings.pipelines.map(pipeline =>
+				`${pipeline.name}:${pipeline.statuses.map(status => `${status.label}:${status.pipelineStatusIcon ?? ''}`).join(',')}`
+			).join('|'),
+			settings.priorities.map(priority => `${priority.label}:${priority.priorityIcon ?? ''}`).join(','),
+		].join('§');
+	}
+
 	eq(other: TaskBarWidget): boolean {
 		if (this.task.rawLine !== other.task.rawLine) return false;
+		if (this.settingsIconSignature !== other.settingsIconSignature) return false;
 		// Also compare indexed data — index may update after docChanged
 		const a = this.indexedTask;
 		const b = other.indexedTask;

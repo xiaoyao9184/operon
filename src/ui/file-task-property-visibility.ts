@@ -1,4 +1,4 @@
-import { KeyMapping } from '../types/settings';
+import { isRetiredKeyMapping, KeyMapping } from '../types/settings';
 import { IndexedTask } from '../types/fields';
 
 export const OPERON_YAML_PROPERTY_HIDDEN_CLASS = 'operon-yaml-property-hidden';
@@ -15,6 +15,7 @@ export function isOperonYamlFileTask(task: IndexedTask | null | undefined): bool
 export function getHiddenYamlPropertyNames(keyMappings: KeyMapping[]): Set<string> {
 	return new Set(
 		keyMappings
+			.filter(mapping => !isRetiredKeyMapping(mapping.canonicalKey))
 			.filter(mapping => mapping.hideInFileTaskView === true)
 			.map(mapping => normalizePropertyName(mapping.visiblePropertyName || mapping.canonicalKey))
 			.filter(Boolean),
