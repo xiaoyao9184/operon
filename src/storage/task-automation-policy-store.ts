@@ -12,6 +12,10 @@ export type TaskAutomationPolicyStoreSettings = Pick<
 	| 'autoCompleteParentWhenAllChildrenTerminal'
 	| 'cascadeCancelToDescendants'
 	| 'newOccurrencePosition'
+	| 'fileTaskAutoArchiveEnabled'
+	| 'fileTaskArchiveFolder'
+	| 'fileTaskArchiveDelaySeconds'
+	| 'fileTaskArchiveOnlyFromFileTasksFolder'
 	| 'fileRepeatDestination'
 	| 'fileRepeatCustomFolder'
 	| 'estimateAutoReallocation'
@@ -21,6 +25,20 @@ export type TaskAutomationPolicyStoreSettings = Pick<
 interface TaskAutomationPolicyStoreData extends TaskAutomationPolicyStoreSettings {
 	version: number;
 }
+
+const TASK_AUTOMATION_POLICY_STORE_SETTING_KEYS = [
+	'autoCompleteParentWhenAllChildrenTerminal',
+	'cascadeCancelToDescendants',
+	'newOccurrencePosition',
+	'fileTaskAutoArchiveEnabled',
+	'fileTaskArchiveFolder',
+	'fileTaskArchiveDelaySeconds',
+	'fileTaskArchiveOnlyFromFileTasksFolder',
+	'fileRepeatDestination',
+	'fileRepeatCustomFolder',
+	'estimateAutoReallocation',
+	'trackerSplitSessionsAtMidnight',
+] as const satisfies readonly (keyof TaskAutomationPolicyStoreSettings)[];
 
 function cloneSettings(settings: TaskAutomationPolicyStoreSettings): TaskAutomationPolicyStoreSettings {
 	return { ...settings };
@@ -34,6 +52,10 @@ function readString(value: unknown, fallback: string): string {
 	return typeof value === 'string' ? value : fallback;
 }
 
+function readNumber(value: unknown, fallback: number): number {
+	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 function readStoreData(
 	raw: Partial<TaskAutomationPolicyStoreData>,
 	fallback: TaskAutomationPolicyStoreSettings,
@@ -45,11 +67,19 @@ function readStoreData(
 		),
 		cascadeCancelToDescendants: readBoolean(raw.cascadeCancelToDescendants, fallback.cascadeCancelToDescendants),
 		newOccurrencePosition: readString(raw.newOccurrencePosition, fallback.newOccurrencePosition) as TaskAutomationPolicyStoreSettings['newOccurrencePosition'],
+		fileTaskAutoArchiveEnabled: readBoolean(raw.fileTaskAutoArchiveEnabled, fallback.fileTaskAutoArchiveEnabled),
+		fileTaskArchiveFolder: readString(raw.fileTaskArchiveFolder, fallback.fileTaskArchiveFolder),
+		fileTaskArchiveDelaySeconds: readNumber(raw.fileTaskArchiveDelaySeconds, fallback.fileTaskArchiveDelaySeconds),
+		fileTaskArchiveOnlyFromFileTasksFolder: readBoolean(raw.fileTaskArchiveOnlyFromFileTasksFolder, fallback.fileTaskArchiveOnlyFromFileTasksFolder),
 		fileRepeatDestination: readString(raw.fileRepeatDestination, fallback.fileRepeatDestination) as TaskAutomationPolicyStoreSettings['fileRepeatDestination'],
 		fileRepeatCustomFolder: readString(raw.fileRepeatCustomFolder, fallback.fileRepeatCustomFolder),
 		estimateAutoReallocation: readBoolean(raw.estimateAutoReallocation, fallback.estimateAutoReallocation),
 		trackerSplitSessionsAtMidnight: readBoolean(raw.trackerSplitSessionsAtMidnight, fallback.trackerSplitSessionsAtMidnight),
 	};
+}
+
+function hasAllStoreSettings(raw: Partial<TaskAutomationPolicyStoreData>): boolean {
+	return TASK_AUTOMATION_POLICY_STORE_SETTING_KEYS.every(key => Object.prototype.hasOwnProperty.call(raw, key));
 }
 
 export class TaskAutomationPolicyStore {
@@ -93,8 +123,8 @@ export class TaskAutomationPolicyStore {
 		try {
 			raw = await adapter.read(TASK_AUTOMATION_POLICY_FILE);
 			const parsed = JSON.parse(raw) as Partial<TaskAutomationPolicyStoreData>;
-			this.settings = readStoreData(parsed, defaults);
-			this.serializedSettings = JSON.stringify(this.settings);
+			this.settings = readStoreData(parsed, legacySettings ?? defaults);
+			this.serializedSettings = hasAllStoreSettings(parsed) ? JSON.stringify(this.settings) : '';
 			this.recoveredFromMalformed = false;
 		} catch {
 			console.warn('Operon: Failed to parse task automation policy store, preserving invalid file as backup and recovering from fallback settings');

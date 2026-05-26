@@ -13,7 +13,7 @@ interface ExternalCalendarSourceStoreData {
 }
 
 function cloneExternalCalendarSource(source: ExternalCalendarSource): ExternalCalendarSource {
-	return { ...source };
+	return { ...source, enabled: source.enabled !== false };
 }
 
 function cloneExternalCalendarSources(sources: ExternalCalendarSource[]): ExternalCalendarSource[] {

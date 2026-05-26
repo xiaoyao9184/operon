@@ -28,6 +28,14 @@ const TASK_COLOR_SOURCE_LABEL_KEYS: Record<TaskColorSource, string> = {
 	priorityColor: 'taskColorSource_priorityColor',
 };
 
+const TASK_COLOR_SOURCE_ICONS: Record<TaskColorSource, string> = {
+	noColor: 'ban',
+	accentColor: 'obsidian',
+	taskColor: 'palette',
+	statusColor: 'workflow',
+	priorityColor: 'flag',
+};
+
 export interface TaskColorSourceDropdown {
 	addOption(value: string, label: string): unknown;
 }
@@ -42,10 +50,18 @@ export function addTaskColorSourceOptions(
 	sources: readonly TaskColorSource[],
 ): void {
 	for (const source of sources) {
-		const key = TASK_COLOR_SOURCE_LABEL_KEYS[source];
-		const localized = t('settings', key);
-		dropdown.addOption(source, localized === key ? TASK_COLOR_SOURCE_LABELS[source] : localized);
+		dropdown.addOption(source, getTaskColorSourceLabel(source));
 	}
+}
+
+export function getTaskColorSourceLabel(source: TaskColorSource): string {
+	const key = TASK_COLOR_SOURCE_LABEL_KEYS[source];
+	const localized = t('settings', key);
+	return localized === key ? TASK_COLOR_SOURCE_LABELS[source] : localized;
+}
+
+export function getTaskColorSourceIcon(source: TaskColorSource): string {
+	return TASK_COLOR_SOURCE_ICONS[source];
 }
 
 export function normalizeTaskColorSource<T extends TaskColorSource>(
@@ -54,8 +70,20 @@ export function normalizeTaskColorSource<T extends TaskColorSource>(
 	fallback: T,
 ): T {
 	return typeof value === 'string' && (allowedSources as readonly string[]).includes(value)
-		? value as T
-		: fallback;
+			? value as T
+			: fallback;
+}
+
+export function getNextTaskColorSource<T extends TaskColorSource>(
+	value: unknown,
+	allowedSources: readonly T[],
+	fallback: T,
+): T {
+	if (allowedSources.length === 0) return fallback;
+	const normalized = normalizeTaskColorSource(value, allowedSources, fallback);
+	const currentIndex = allowedSources.indexOf(normalized);
+	const nextIndex = currentIndex >= 0 ? (currentIndex + 1) % allowedSources.length : 0;
+	return allowedSources[nextIndex] ?? fallback;
 }
 
 export function resolveTaskColorSourceForTask(

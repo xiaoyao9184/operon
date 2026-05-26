@@ -173,17 +173,22 @@ export function renderQuickInlineTaskCreatorInput(
 		}
 
 		setSubmitting(true);
+		let shouldClearInput = false;
+		let shouldRefocus = false;
 		try {
 			const result = await options.onSubmit(draft);
-			if (!result) return;
-			inputEl.value = '';
-			if (options.refocusOnSuccess !== false && inputEl.isConnected) {
-				inputEl.focus();
+			if (!result) {
+				shouldRefocus = options.refocusOnSuccess !== false;
+				return;
 			}
+			shouldClearInput = true;
+			shouldRefocus = options.refocusOnSuccess !== false;
 		} catch (error) {
 			console.error(`Operon: ${options.submitErrorContext ?? 'quick inline task creation failed'}`, error);
 		} finally {
 			setSubmitting(false);
+			if (shouldClearInput) inputEl.value = '';
+			if (shouldRefocus && inputEl.isConnected) inputEl.focus();
 		}
 	};
 

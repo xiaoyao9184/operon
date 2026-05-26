@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Validation
 
+## [1.0.5] - 2026-05-25
+
+### New
+- Added Active File as an inline task default save location, so New Operon Task can write inline tasks into the currently active Markdown file using the configured heading keyword.
+- Added Ask Every Time as an inline task default save location, so task creation surfaces can choose the target Markdown file at creation time without changing the default settings.
+- Added optional auto-archiving for finished or cancelled file tasks, so completed file-task notes can move into a configured archive folder after a short safety delay.
+- Added Task Editor workflow picker settings, including a Links picker row, so users can choose which workflow rows appear in the editor and reorder them without changing task metadata.
+- Added a Calendar preset option and quick actions to hide future recurring occurrences, keeping planning views less crowded without hiding materialized tasks.
+- Added a Calendar preset option and quick action to hide selected external calendars per preset, making crowded planning views easier to control without changing source selections.
+- Added a Calendar quick action to cycle a preset's task color source from the toolbar or sidebar, with source-specific icons in the button and preset settings menus for faster visual tuning while planning.
+- Added a Calendar quick action to update all external calendars from the toolbar or sidebar, so cached calendar events can be refreshed without opening settings.
+
+### Improved
+- Clarified Operon's vault, clipboard, and external calendar data behavior in the README, so users can understand Community Plugin scorecard disclosures more easily.
+
+### Changed
+- Moved external calendar visibility from source-level enablement to Calendar preset controls, while preserving previously disabled sources as hidden until they are selected in a preset.
+
+### Fixed
+- Fixed Kanban search clearing from the toolbar clear button leaving the board narrowed to the previous search results.
+
+### Validation
+- Local validation passed `npm run check:local`, including strict linting, production build, release guard, and the full Phase 5 regression suite at 642/642 checks.
+
 ## [1.0.4] - 2026-05-24
 
 ### New

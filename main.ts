@@ -138,6 +138,7 @@ import { TimeSessionHistoryView, TIME_SESSION_HISTORY_VIEW_TYPE } from './src/ui
 import { FlowTimeView, FLOW_TIME_VIEW_TYPE } from './src/ui/flow-time-view';
 import { TimeTrackerStatusBar } from './src/ui/time-tracker-status-bar';
 import { FormatConverter } from './src/systems/format-converter';
+import { FileTaskArchiver } from './src/systems/file-task-archiver';
 import { ExternalCalendarService } from './src/systems/external-calendar-service';
 import { buildExternalCalendarItems } from './src/systems/external-calendar-query';
 import { formatDurationHuman, parseLocalDatetime } from './src/systems/tracker-utils';
@@ -233,6 +234,7 @@ import { DEFAULT_PRIORITIES } from './src/types/priority';
 import { initI18n, t } from './src/core/i18n';
 import { ConfirmActionModal } from './src/ui/confirm-action-modal';
 import { FileTaskTemplatePickerModal } from './src/ui/file-task-template-picker-modal';
+import { InlineTaskTargetFilePickerModal } from './src/ui/inline-task-target-file-picker-modal';
 import { FieldRenameProgressModal } from './src/ui/field-rename-progress-modal';
 import { DuplicateOperonIdModal } from './src/ui/duplicate-operonid-modal';
 import {
@@ -324,6 +326,23 @@ interface TaskCreatorInlineCreationOptions {
 	targetDateKey?: string | null;
 	parentAwarePlacement?: boolean;
 }
+
+interface TaskCreatorInlineTargetFile {
+	file: TFile;
+	fallbackParentTaskId: string | null;
+	fallbackParentFieldValues: Record<string, string> | null;
+	dailyDateHeading?: string | null;
+}
+
+type TaskCreatorInlineTargetResolution =
+	| ({ kind: 'target' } & TaskCreatorInlineTargetFile)
+	| { kind: 'cancelled' }
+	| { kind: 'failed' };
+
+type TaskCreatorInlineCreationAttempt =
+	| { kind: 'created'; result: QuickInlineTaskCreationResult }
+	| { kind: 'cancelled' }
+	| { kind: 'failed' };
 
 interface ProjectedCalendarOccurrenceRef {
 	seriesId: string;
@@ -500,6 +519,7 @@ export default class OperonPlugin extends Plugin {
 	private indexSideEffectTimer: WindowTimeoutHandle | null = null;
 	private indexSideEffectRunning = false;
 	private indexSideEffectFollowupRequested = false;
+	private fileTaskArchiver: FileTaskArchiver | null = null;
 	private livePreviewEphemeralSession = new LivePreviewEphemeralSessionController();
 	private activeLivePreviewPickerClose: (() => void) | null = null;
 	private suppressLivePreviewSessionEditorChange = false;
@@ -673,6 +693,7 @@ export default class OperonPlugin extends Plugin {
 			rangeStart,
 			rangeEnd,
 			preset?.externalCalendarVisibility,
+			preset?.showExternalCalendars,
 		);
 	}
 
@@ -1030,6 +1051,9 @@ export default class OperonPlugin extends Plugin {
 			operonId => this.suppressRawTaskCreationNotice(operonId),
 		);
 		this.formatConverter = new FormatConverter(this.app, this.indexer, this.settings);
+		this.fileTaskArchiver = new FileTaskArchiver(this.app, this.indexer, () => this.settings, {
+			isTaskActive: operonId => this.timeTracker.isTimerRunning(operonId),
+		});
 
 		// Ensure file tasks folder exists on startup
 		await this.formatConverter.ensureFileTasksFolder();
@@ -1241,6 +1265,8 @@ export default class OperonPlugin extends Plugin {
 		this.duplicateOperonIdModal = null;
 		this.taskCreatorModal?.close();
 		this.taskCreatorModal = null;
+		this.fileTaskArchiver?.destroy();
+		this.fileTaskArchiver = null;
 		this.pinnedDock = null;
 		await this.timeTracker.flushPendingTransitions();
 		this.timeTracker.destroy();
@@ -1362,6 +1388,7 @@ export default class OperonPlugin extends Plugin {
 					getSettings: () => this.settings,
 					saveSettings: () => this.storage.saveSettings(),
 					createInlineTaskFromQuickInput: (draft) => this.createInlineTaskFromCreatorDraftResult(draft),
+					shouldPromptForInlineTaskTarget: () => this.resolveEffectiveInlineTaskSaveMode() === 'ask-every-time',
 					startTimerForTask: (operonId, source, startOverride) => this.startTimerForTask(operonId, source, startOverride),
 					startUnassignedTimer: (source) => this.startUnassignedTimer(source),
 					stopActiveTimer: (reason) => this.stopActiveTimer(reason),
@@ -1388,9 +1415,9 @@ export default class OperonPlugin extends Plugin {
 					onAllDaySlotSelection: (selection) => this.handleCalendarSlotSelection(leaf, selection),
 					onAllDayScheduledMove: (taskId, selection) => this.handleCalendarScheduledMove(taskId, selection),
 					onAllDayScheduledResizeRight: (taskId, selection) => this.handleCalendarScheduledResizeRight(taskId, selection),
-						onAllDayItemDropToTimed: (taskId, selection) => this.handleCalendarAllDayDropToTimed(taskId, selection),
-						onItemAction: (taskId, actionId, context) => this.handleContextualMenuAction(taskId, actionId, context),
-						onStatusIconClick: (taskId) => this.handleCalendarStatusIconClick(taskId),
+					onAllDayItemDropToTimed: (taskId, selection) => this.handleCalendarAllDayDropToTimed(taskId, selection),
+					onItemAction: (taskId, actionId, context) => this.handleContextualMenuAction(taskId, actionId, context),
+					onStatusIconClick: (taskId) => this.handleCalendarStatusIconClick(taskId),
 					onSidebarTaskDropToTimed: (taskId, selection) => this.handleCalendarSidebarTaskDrop(leaf, taskId, selection),
 					onSidebarTaskDropToAllDay: (taskId, selection) => this.handleCalendarSidebarTaskDrop(leaf, taskId, selection),
 					onSidebarWidthChange: async (widthPx) => {
@@ -1406,15 +1433,39 @@ export default class OperonPlugin extends Plugin {
 						await this.storage.saveSettings();
 						this.refreshViews();
 					},
-						onToggleDueLaneVisibility: async (nextValue) => {
-							this.settings.calendarShowDueMarkers = nextValue;
-							await this.storage.saveSettings();
-							this.refreshViews();
-						},
-						onExternalItemCreateTask: (seed) => this.handleExternalCalendarItemCreate(leaf, seed),
-						onCalendarDragInteractionEnd: () => this.flushPendingCalendarRefresh(),
-						onOpenPresetSettings: (presetId) => {
-							new CalendarPresetQuickSettingsModal(this.app, {
+					onToggleDueLaneVisibility: async (nextValue) => {
+						this.settings.calendarShowDueMarkers = nextValue;
+						await this.storage.saveSettings();
+						this.refreshViews();
+					},
+					onToggleProjectedOccurrences: async (presetId, nextValue) => {
+						const preset = this.settings.calendarPresets.find(entry => entry.id === presetId);
+						if (!preset) return;
+						preset.showProjectedOccurrences = nextValue;
+						await this.storage.saveSettings();
+						this.refreshViews();
+					},
+					onToggleExternalCalendars: async (presetId, nextValue) => {
+						const preset = this.settings.calendarPresets.find(entry => entry.id === presetId);
+						if (!preset) return;
+						preset.showExternalCalendars = nextValue;
+						await this.storage.saveSettings();
+						this.refreshViews();
+					},
+					onCycleTaskColorSource: async (presetId, nextSource) => {
+						const preset = this.settings.calendarPresets.find(entry => entry.id === presetId);
+						if (!preset) return;
+						preset.colorSource = nextSource;
+						await this.storage.saveSettings();
+						this.refreshViews();
+					},
+					onSyncExternalCalendars: () => {
+						runAsyncAction('calendar quick action external calendar sync failed', () => this.syncAllExternalCalendarsNow());
+					},
+					onExternalItemCreateTask: (seed) => this.handleExternalCalendarItemCreate(leaf, seed),
+					onCalendarDragInteractionEnd: () => this.flushPendingCalendarRefresh(),
+					onOpenPresetSettings: (presetId) => {
+						new CalendarPresetQuickSettingsModal(this.app, {
 							getSettings: () => this.settings,
 							presetId,
 							onSave: async () => {
@@ -2520,6 +2571,18 @@ export default class OperonPlugin extends Plugin {
 		});
 	}
 
+	private async promptInlineTaskTargetFileSelection(options: {
+		excludedFilePath?: string | null;
+	} = {}): Promise<TFile | null> {
+		return await new Promise(resolve => {
+			new InlineTaskTargetFilePickerModal(this.app, {
+				excludedFilePath: options.excludedFilePath,
+				onChooseFile: file => resolve(file),
+				onCancel: () => resolve(null),
+			}).open();
+		});
+	}
+
 	private resolveEffectiveInlineTaskSaveMode(): InlineTaskSaveMode {
 		return resolveEffectiveInlineTaskSaveMode(this.settings, isDailyNotesCoreAvailable(this.app));
 	}
@@ -2527,7 +2590,7 @@ export default class OperonPlugin extends Plugin {
 	private getCalendarInlineTaskAvailability(): { enabled: boolean; reason?: string } {
 		const dailyNotesAvailable = isDailyNotesCoreAvailable(this.app);
 		const saveMode = this.resolveEffectiveInlineTaskSaveMode();
-		if (saveMode === 'specific-file' || dailyNotesAvailable) {
+		if (saveMode !== 'daily-notes' || dailyNotesAvailable) {
 			return { enabled: true };
 		}
 		return {
@@ -2582,7 +2645,7 @@ export default class OperonPlugin extends Plugin {
 	private getKanbanInlineTaskAvailability(): { enabled: boolean; reason?: string } {
 		const dailyNotesAvailable = isDailyNotesCoreAvailable(this.app);
 		const saveMode = this.resolveEffectiveInlineTaskSaveMode();
-		if (saveMode === 'specific-file' || dailyNotesAvailable) {
+		if (saveMode !== 'daily-notes' || dailyNotesAvailable) {
 			return { enabled: true };
 		}
 		return {
@@ -3061,7 +3124,7 @@ export default class OperonPlugin extends Plugin {
 		selection: CalendarSlotSelection,
 		draft: TaskCreatorDraft,
 	): Promise<boolean> {
-		if (this.resolveEffectiveInlineTaskSaveMode() === 'specific-file') {
+		if (this.resolveEffectiveInlineTaskSaveMode() !== 'daily-notes') {
 			const created = await this.createInlineTaskFromCreatorDraftResult(draft, {
 				targetDateKey: selection.startDate,
 				parentAwarePlacement: false,
@@ -5008,19 +5071,23 @@ export default class OperonPlugin extends Plugin {
 		this.showRawTaskCreationNotices(changes);
 
 		const aggregateChanges = changes.filter(change => this.shouldRefreshAggregateForIndexedChange(change));
-		if (aggregateChanges.length === 0) return;
-
-		const results = await Promise.allSettled(
-			aggregateChanges.map(change =>
-				this.refreshAggregateTotalsAfterTaskMutation(change.before, change.after),
-			),
-		);
-		for (const result of results) {
-			if (result.status === 'rejected') {
-				console.warn('Operon: failed to refresh aggregates after indexed task change', result.reason);
+		if (aggregateChanges.length > 0) {
+			const results = await Promise.allSettled(
+				aggregateChanges.map(change =>
+					this.refreshAggregateTotalsAfterTaskMutation(change.before, change.after),
+				),
+			);
+			for (const result of results) {
+				if (result.status === 'rejected') {
+					console.warn('Operon: failed to refresh aggregates after indexed task change', result.reason);
+				}
 			}
+			this.scheduleIndexSideEffects();
 		}
-		this.scheduleIndexSideEffects();
+
+		for (const change of changes) {
+			this.fileTaskArchiver?.scheduleForIndexedChange(change.before, change.after);
+		}
 	}
 
 	private showRawTaskCreationNotices(changes: IndexedTaskDelta[]): void {
@@ -7612,7 +7679,7 @@ export default class OperonPlugin extends Plugin {
 
 	private getActiveMarkdownFile(): TFile | null {
 		const activeFile = this.app.workspace.getActiveFile();
-		return activeFile instanceof TFile ? activeFile : null;
+		return activeFile instanceof TFile && activeFile.extension === 'md' ? activeFile : null;
 	}
 
 	private openTaskCreator(
@@ -7933,23 +8000,49 @@ export default class OperonPlugin extends Plugin {
 		});
 	}
 
-	private async resolveTaskCreatorInlineTargetFile(options: { targetDateKey?: string | null } = {}): Promise<{
-		file: TFile | null;
-		fallbackParentTaskId: string | null;
-		fallbackParentFieldValues: Record<string, string> | null;
-		dailyDateHeading?: string | null;
-	}> {
+	private async resolveTaskCreatorInlineTargetFile(options: {
+		targetDateKey?: string | null;
+		excludedFilePath?: string | null;
+	} = {}): Promise<TaskCreatorInlineTargetResolution> {
 		const targetDateKey = options.targetDateKey?.trim() || localToday();
-		if (this.resolveEffectiveInlineTaskSaveMode() === 'daily-notes') {
+		const saveMode = this.resolveEffectiveInlineTaskSaveMode();
+		if (saveMode === 'daily-notes') {
 			const dailyNote = await this.resolveOrCreateCalendarDailyNoteResult(targetDateKey);
 			if (!(dailyNote.file instanceof TFile)) {
 				new Notice(t('notifications', 'dailyNoteResolveFailed'));
-				return { file: null, fallbackParentTaskId: null, fallbackParentFieldValues: null, dailyDateHeading: null };
+				return { kind: 'failed' };
 			}
 			return {
+				kind: 'target',
 				file: dailyNote.file,
 				fallbackParentTaskId: dailyNote.wasCreated ? dailyNote.operonParentTaskId : null,
 				fallbackParentFieldValues: dailyNote.wasCreated ? dailyNote.operonParentFieldValues : null,
+				dailyDateHeading: null,
+			};
+		}
+		if (saveMode === 'active-file') {
+			const activeFile = this.getActiveMarkdownFile();
+			const excludedFilePath = options.excludedFilePath?.trim() ?? '';
+			if (activeFile && activeFile.path !== excludedFilePath) {
+				return {
+					kind: 'target',
+					file: activeFile,
+					fallbackParentTaskId: null,
+					fallbackParentFieldValues: null,
+					dailyDateHeading: null,
+				};
+			}
+		}
+		if (saveMode === 'ask-every-time') {
+			const selectedFile = await this.promptInlineTaskTargetFileSelection({
+				excludedFilePath: options.excludedFilePath,
+			});
+			if (!(selectedFile instanceof TFile)) return { kind: 'cancelled' };
+			return {
+				kind: 'target',
+				file: selectedFile,
+				fallbackParentTaskId: null,
+				fallbackParentFieldValues: null,
 				dailyDateHeading: null,
 			};
 		}
@@ -7958,9 +8051,10 @@ export default class OperonPlugin extends Plugin {
 		const targetFile = await this.resolveOrCreateInlineTaskTargetFile(targetPath);
 		if (!(targetFile instanceof TFile)) {
 			new Notice(t('notifications', 'inlineTaskTargetInvalid'));
-			return { file: null, fallbackParentTaskId: null, fallbackParentFieldValues: null, dailyDateHeading: null };
+			return { kind: 'failed' };
 		}
 		return {
+			kind: 'target',
 			file: targetFile,
 			fallbackParentTaskId: null,
 			fallbackParentFieldValues: null,
@@ -8102,11 +8196,11 @@ export default class OperonPlugin extends Plugin {
 	private async insertTaskCreatorInlineTaskUsingDefaultTarget(
 		draft: TaskCreatorDraft,
 		options: TaskCreatorInlineCreationOptions = {},
-	): Promise<QuickInlineTaskCreationResult | null> {
+	): Promise<TaskCreatorInlineCreationAttempt> {
 		const target = await this.resolveTaskCreatorInlineTargetFile({
 			targetDateKey: options.targetDateKey,
 		});
-		if (!(target.file instanceof TFile)) return null;
+		if (target.kind !== 'target') return target;
 
 		const created = await this.insertTaskCreatorInlineTaskIntoFile(
 			target.file,
@@ -8117,12 +8211,15 @@ export default class OperonPlugin extends Plugin {
 				dailyDateHeading: target.dailyDateHeading,
 			},
 		);
-		if (!created) return null;
+		if (!created) return { kind: 'failed' };
 
 		return {
-			operonId: created.operonId,
-			filePath: target.file.path,
-			lineNumber: created.lineNumber,
+			kind: 'created',
+			result: {
+				operonId: created.operonId,
+				filePath: target.file.path,
+				lineNumber: created.lineNumber,
+			},
 		};
 	}
 
@@ -8199,7 +8296,7 @@ export default class OperonPlugin extends Plugin {
 	private async insertTaskCreatorInlineTaskWithResolvedTarget(
 		draft: TaskCreatorDraft,
 		options: TaskCreatorInlineCreationOptions = {},
-	): Promise<QuickInlineTaskCreationResult | null> {
+	): Promise<TaskCreatorInlineCreationAttempt> {
 		if (options.parentAwarePlacement !== false) {
 			const placement = resolveTaskCreatorInlinePlacement({
 				draft,
@@ -8208,7 +8305,7 @@ export default class OperonPlugin extends Plugin {
 			});
 			if (placement.kind === 'below-inline-parent') {
 				const created = await this.insertTaskCreatorInlineTaskBelowInlineParent(draft, placement.parentTask);
-				if (created) return created;
+				if (created) return { kind: 'created', result: created };
 			}
 
 			if (placement.kind === 'inside-file-parent') {
@@ -8217,7 +8314,7 @@ export default class OperonPlugin extends Plugin {
 					placement.parentTask,
 					placement.headingKeyword,
 				);
-				if (created) return created;
+				if (created) return { kind: 'created', result: created };
 			}
 		}
 
@@ -8230,14 +8327,16 @@ export default class OperonPlugin extends Plugin {
 		draft: TaskCreatorDraft,
 		options: TaskCreatorInlineCreationOptions = {},
 	): Promise<QuickInlineTaskCreationResult | null> {
-		const created = await this.insertTaskCreatorInlineTaskWithResolvedTarget(draft, {
+		const creation = await this.insertTaskCreatorInlineTaskWithResolvedTarget(draft, {
 			targetDateKey: options.targetDateKey,
 			parentAwarePlacement: options.parentAwarePlacement,
 		});
-		if (!created) {
+		if (creation.kind === 'cancelled') return null;
+		if (creation.kind !== 'created') {
 			new Notice(t('notifications', 'inlineTaskCreateFailed'));
 			return null;
 		}
+		const created = creation.result;
 		const createdFilePath = created.filePath;
 		const createdLineNumber = created.lineNumber;
 		if (!createdFilePath || createdLineNumber === undefined) {
@@ -8574,8 +8673,14 @@ export default class OperonPlugin extends Plugin {
 				? await this.insertInlineTaskLineAtCursorTarget(cursorTarget, inlineTaskLine, file.path)
 				: null;
 			if (!insertedTarget) {
-				const target = await this.resolveTaskCreatorInlineTargetFile();
-				if (!(target.file instanceof TFile)) {
+				const target = await this.resolveTaskCreatorInlineTargetFile({
+					excludedFilePath: file.path,
+				});
+				if (target.kind === 'cancelled') {
+					suppressInlineInsertFailedNotice = true;
+					return null;
+				}
+				if (target.kind !== 'target') {
 					suppressInlineInsertFailedNotice = true;
 					return null;
 				}
@@ -8944,6 +9049,7 @@ export default class OperonPlugin extends Plugin {
 		options: { modifiedTimestamp?: string; indexPerfContext?: IndexPerfContext; precommittedAggregateIds?: Set<string> } = {},
 	): Promise<void> {
 		await this.aggregateCoordinator.refreshAfterTaskMutation(beforeTask, afterTask, options);
+		this.fileTaskArchiver?.scheduleForIndexedChange(beforeTask, afterTask);
 	}
 
 	private async refreshAggregateStateAfterTaskRemoval(removedTasks: IndexedTask[]): Promise<void> {
@@ -9786,27 +9892,6 @@ export default class OperonPlugin extends Plugin {
 
 	private isMarkdownFenceLine(line: string): boolean {
 		return /^\s*(?:`{3,}|~{3,})/.test(line);
-	}
-
-	private async readClipboardTextSafe(): Promise<string | null> {
-		try {
-			return await navigator.clipboard.readText();
-		} catch (error) {
-			console.error('Operon: Clipboard read failed', error);
-			new Notice(t('notifications', 'clipboardReadFailed'));
-			return null;
-		}
-	}
-
-	private async writeClipboardTextSafe(text: string): Promise<boolean> {
-		try {
-			await navigator.clipboard.writeText(text);
-			return true;
-		} catch (error) {
-			console.error('Operon: Clipboard write failed', error);
-			new Notice(t('notifications', 'clipboardWriteFailed'));
-			return false;
-		}
 	}
 
 	private buildKeyMappingSignature(): string {

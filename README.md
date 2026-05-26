@@ -460,9 +460,16 @@ Operon bundles **CodeMirror** modules for editor integrations and **ical.js** fo
 
 Operon stores settings and runtime data in the vault-level `.operon/` folder, including split settings stores, caches, pinned task state, recurrence data, and indexes. It does not store user data in `.obsidian/plugins/operon/data.json`.
 
-Operon does **not include telemetry, analytics, tracking pixels, or background usage reporting**. Your task data stays in your vault; external ICS support only reads calendar sources you configure into Operon's local cache.
+### Vault and clipboard access
 
-Cached external ICS data is stored in the vault-level Operon cache. Operon does not include a workaround for the third-party Calendar plugin or Settings Search plugin.
+Operon is a local-first task manager for Markdown tasks. To build its task index and keep task views accurate, it uses Obsidian's Vault API to work with files inside the active vault.
+
+- **Vault enumeration**: Operon lists Markdown files in the vault to find inline tasks, file tasks, task templates, daily-note targets, filters, and picker suggestions. This gives Operon access to vault file paths, but it is used for local indexing and navigation inside Obsidian.
+- **Vault read/write**: Operon reads task files to parse task metadata and writes only when you create, edit, move, convert, schedule, complete, or otherwise update tasks through Operon.
+- **Clipboard access**: Operon writes to the system clipboard only for user-initiated copy actions, such as copying an `operonId`, copying an external task link, or copying an embeddable filter block.
+- **External calendar sources**: If you configure external ICS calendar URLs, Operon fetches those read-only calendar sources and stores the parsed cache locally in the vault-level `.operon/` folder.
+
+Operon does not read the system clipboard, monitor clipboard changes, include telemetry, analytics, tracking pixels, or background usage reporting. Task data and runtime data stay in your vault. Cached external ICS data is stored in the vault-level Operon cache. Operon does not include a workaround for the third-party Calendar plugin or Settings Search plugin.
 
 ## License
 

@@ -27,6 +27,8 @@ export interface CalendarPreset {
 	showAllDayLane: boolean;
 	showDueMarkers: boolean;
 	showWeekends: boolean;
+	showProjectedOccurrences: boolean;
+	showExternalCalendars: boolean;
 	hiddenTimeStart: string;
 	hiddenTimeEnd: string;
 	colorSource: CalendarColorSource;
@@ -197,6 +199,8 @@ export const DEFAULT_CALENDAR_PRESETS: CalendarPreset[] = [
 		showAllDayLane: true,
 		showDueMarkers: true,
 		showWeekends: true,
+		showProjectedOccurrences: true,
+		showExternalCalendars: true,
 		hiddenTimeStart: '00:00',
 		hiddenTimeEnd: '06:00',
 		colorSource: 'taskColor',
@@ -218,6 +222,8 @@ export const DEFAULT_CALENDAR_PRESETS: CalendarPreset[] = [
 		showAllDayLane: true,
 		showDueMarkers: true,
 		showWeekends: true,
+		showProjectedOccurrences: true,
+		showExternalCalendars: true,
 		hiddenTimeStart: '00:00',
 		hiddenTimeEnd: '06:00',
 		colorSource: 'taskColor',
@@ -239,6 +245,8 @@ export const DEFAULT_CALENDAR_PRESETS: CalendarPreset[] = [
 		showAllDayLane: true,
 		showDueMarkers: true,
 		showWeekends: true,
+		showProjectedOccurrences: true,
+		showExternalCalendars: true,
 		hiddenTimeStart: '00:00',
 		hiddenTimeEnd: '06:00',
 		colorSource: 'taskColor',
@@ -260,6 +268,8 @@ export const DEFAULT_CALENDAR_PRESETS: CalendarPreset[] = [
 		showAllDayLane: true,
 		showDueMarkers: true,
 		showWeekends: true,
+		showProjectedOccurrences: true,
+		showExternalCalendars: true,
 		hiddenTimeStart: '00:00',
 		hiddenTimeEnd: '06:00',
 		colorSource: 'taskColor',
@@ -289,6 +299,8 @@ function isPreviousBuiltIn7DaysTimeGridPreset(preset: CalendarPreset): boolean {
 		&& preset.showAllDayLane === true
 		&& preset.showDueMarkers === true
 		&& preset.showWeekends === true
+		&& preset.showProjectedOccurrences === true
+		&& preset.showExternalCalendars === true
 		&& preset.hiddenTimeStart === '00:00'
 		&& preset.hiddenTimeEnd === '06:00'
 		&& preset.colorSource === 'taskColor'
@@ -298,19 +310,24 @@ function isPreviousBuiltIn7DaysTimeGridPreset(preset: CalendarPreset): boolean {
 }
 
 export function normalizeBuiltInCalendarPreset(preset: CalendarPreset): CalendarPreset {
-	if (isPreviousBuiltIn7DaysTimeGridPreset(preset)) {
+	const normalizedPreset = {
+		...preset,
+		showProjectedOccurrences: preset.showProjectedOccurrences !== false,
+		showExternalCalendars: preset.showExternalCalendars !== false,
+	};
+	if (isPreviousBuiltIn7DaysTimeGridPreset(normalizedPreset)) {
 		return {
-			...preset,
+			...normalizedPreset,
 			name: '7 Days Multi Week',
 			surfaceType: 'multiWeek',
 			weekCount: 4,
 			focusedWeekNumber: 1,
 		};
 	}
-	const migration = BUILTIN_CALENDAR_PRESET_NAME_MIGRATIONS[preset.id];
-	if (!migration || preset.name !== migration.from) return preset;
+	const migration = BUILTIN_CALENDAR_PRESET_NAME_MIGRATIONS[normalizedPreset.id];
+	if (!migration || normalizedPreset.name !== migration.from) return normalizedPreset;
 	return {
-		...preset,
+		...normalizedPreset,
 		name: migration.to,
 	};
 }

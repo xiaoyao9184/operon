@@ -48,7 +48,8 @@ export class ExternalCalendarService {
 		}
 		this.caches = retained;
 		for (const sourceId of Array.from(this.timers.keys())) {
-			if (!this.sources.has(sourceId) || !this.sources.get(sourceId)?.enabled) {
+			const source = this.sources.get(sourceId);
+			if (!source || !this.isAutoSyncableSource(source)) {
 				this.clearTimer(sourceId);
 			}
 		}
@@ -91,11 +92,9 @@ export class ExternalCalendarService {
 	async syncNow(sourceId: string): Promise<'synced' | 'skipped' | 'failed'> {
 		if (this.destroyed) return 'skipped';
 		const source = this.sources.get(sourceId);
-		if (!source || !this.hasSyncUrl(source)) return 'skipped';
-		await this.syncSource(sourceId, this.requestedRangeStart, this.requestedRangeEnd, {
-			ignoreEnabled: true,
-		});
-		if (!this.destroyed && source.enabled) {
+		if (!source || !this.isAutoSyncableSource(source)) return 'skipped';
+		await this.syncSource(sourceId, this.requestedRangeStart, this.requestedRangeEnd);
+		if (!this.destroyed && this.isAutoSyncableSource(source)) {
 			this.scheduleTimer(sourceId);
 		}
 		if (this.destroyed) return 'skipped';
@@ -188,12 +187,11 @@ export class ExternalCalendarService {
 		sourceId: string,
 		rangeStart: string,
 		rangeEnd: string,
-		options: { ignoreEnabled?: boolean } = {},
 	): Promise<void> {
 		if (this.destroyed) return Promise.resolve();
 		const existing = this.syncPromises.get(sourceId);
 		if (existing) return existing;
-		const run = this.syncSourceInternal(sourceId, rangeStart, rangeEnd, options)
+		const run = this.syncSourceInternal(sourceId, rangeStart, rangeEnd)
 			.finally(() => {
 				if (this.syncPromises.get(sourceId) === run) {
 					this.syncPromises.delete(sourceId);
@@ -207,16 +205,11 @@ export class ExternalCalendarService {
 		sourceId: string,
 		rangeStart: string,
 		rangeEnd: string,
-		options: { ignoreEnabled?: boolean } = {},
 	): Promise<void> {
 		if (this.destroyed) return;
 		const source = this.sources.get(sourceId);
 		if (!source) return;
-		if (options.ignoreEnabled === true) {
-			if (!this.hasSyncUrl(source)) return;
-		} else if (!this.isAutoSyncableSource(source)) {
-			return;
-		}
+		if (!this.isAutoSyncableSource(source)) return;
 		const cache = this.caches.get(sourceId) ?? {
 			sourceId,
 			syncedAt: null,
@@ -285,10 +278,6 @@ export class ExternalCalendarService {
 			if (this.destroyed) return;
 			this.onChange();
 		}
-	}
-
-	private hasSyncUrl(source: ExternalCalendarSource): boolean {
-		return source.url.trim().length > 0;
 	}
 
 	private isAutoSyncableSource(source: ExternalCalendarSource): boolean {

@@ -7,11 +7,11 @@ import { CalendarFilterPickerModal } from './calendar-filter-picker-modal';
 import { showTimePicker } from '../field-pickers/time-picker';
 import {
 	CALENDAR_TASK_COLOR_SOURCES,
-	addTaskColorSourceOptions,
 	normalizeTaskColorSource,
 } from '../../core/task-color-source';
 import { runSettingsAsync, settingsAsyncHandler } from '../settings/async-settings-action';
 import { parsePresetNumber } from '../settings/preset-control-helpers';
+import { renderTaskColorSourceSelectButton, showTaskColorSourceSelectMenu } from '../task-color-source-select';
 
 interface CalendarPresetQuickSettingsModalOptions {
 	getSettings: () => OperonSettings;
@@ -263,12 +263,20 @@ export class CalendarPresetQuickSettingsModal extends Modal {
 		new Setting(contentEl)
 			.setName(t('calendar', 'taskColorSource'))
 			.setDesc(t('calendar', 'taskColorSourceDesc'))
-			.addDropdown(dropdown => {
-				addTaskColorSourceOptions(dropdown, CALENDAR_TASK_COLOR_SOURCES);
-				dropdown.setValue(preset.colorSource);
-				dropdown.onChange(async value => {
-					await this.updatePreset(current => {
-						current.colorSource = normalizeTaskColorSource(value, CALENDAR_TASK_COLOR_SOURCES, 'taskColor');
+			.addButton(button => {
+				const currentSource = normalizeTaskColorSource(preset.colorSource, CALENDAR_TASK_COLOR_SOURCES, 'taskColor');
+				renderTaskColorSourceSelectButton(button.buttonEl, currentSource);
+				button.onClick(event => {
+					event.preventDefault();
+					showTaskColorSourceSelectMenu(button.buttonEl, {
+						sources: CALENDAR_TASK_COLOR_SOURCES,
+						currentSource,
+						onSelect: settingsAsyncHandler('calendar preset task color source selection failed', async (source) => {
+							await this.updatePreset(current => {
+								current.colorSource = source;
+							});
+							this.render();
+						}),
 					});
 				});
 			});
@@ -311,6 +319,30 @@ export class CalendarPresetQuickSettingsModal extends Modal {
 				});
 			});
 
+		new Setting(contentEl)
+			.setName(t('calendar', 'showFutureOccurrences'))
+			.setDesc(t('calendar', 'showFutureOccurrencesDesc'))
+			.addToggle(toggle => {
+				toggle.setValue(preset.showProjectedOccurrences);
+				toggle.onChange(async value => {
+					await this.updatePreset(current => {
+						current.showProjectedOccurrences = value;
+					});
+				});
+			});
+
+		new Setting(contentEl)
+			.setName(t('calendar', 'showExternalCalendars'))
+			.setDesc(t('calendar', 'showExternalCalendarsDesc'))
+			.addToggle(toggle => {
+				toggle.setValue(preset.showExternalCalendars);
+				toggle.onChange(async value => {
+					await this.updatePreset(current => {
+						current.showExternalCalendars = value;
+					});
+				});
+			});
+
 		const externalCalendars = this.options.getSettings().externalCalendars;
 		if (externalCalendars.length > 0) {
 			contentEl.createEl('h3', {
@@ -324,6 +356,10 @@ export class CalendarPresetQuickSettingsModal extends Modal {
 					.addToggle(toggle => {
 						toggle.setValue(isVisible);
 						toggle.onChange(async value => {
+							if (value) {
+								const matchingSource = this.options.getSettings().externalCalendars.find(entry => entry.id === source.id);
+								if (matchingSource) matchingSource.enabled = true;
+							}
 							await this.updatePreset(current => {
 								current.externalCalendarVisibility[source.id] = value;
 							});

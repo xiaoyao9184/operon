@@ -678,6 +678,7 @@ export class KanbanView extends ItemView {
 				...this.ensureState(),
 				searchQuery,
 			});
+			this.lastRenderSignature = null;
 		}
 
 		private refreshKanbanSearchResults(searchWrap: HTMLElement): void {

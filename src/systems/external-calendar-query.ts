@@ -15,10 +15,11 @@ export function buildExternalCalendarItems(
 	rangeStart: string,
 	rangeEnd: string,
 	presetVisibility?: Record<string, boolean>,
+	showExternalCalendars = true,
 ): CalendarItem[] {
 	const sourceMap = new Map(
 		sources
-			.filter(source => source.enabled && (presetVisibility === undefined || presetVisibility[source.id] === true))
+			.filter(source => source.enabled && showExternalCalendars !== false && (presetVisibility === undefined || presetVisibility[source.id] === true))
 			.map(source => [source.id, source])
 	);
 	const items: CalendarItem[] = [];

@@ -49,23 +49,22 @@ export class ExternalCalendarSourceEditModal extends Modal {
 			text: t('settings', 'externalCalendarEditTitle'),
 		});
 
-		new Setting(c)
-			.setName(t('settings', 'externalCalendarEnabled'))
-			.setDesc(t('settings', 'externalCalendarEnabledDesc'))
-			.addToggle(toggle => {
-				toggle.setValue(this.source.enabled);
-				toggle.onChange(value => { this.source.enabled = value; });
-			});
+		c.createEl('p', {
+			cls: 'operon-external-calendar-preset-note',
+			text: t('settings', 'externalCalendarPresetVisibilityNote'),
+		});
 
-		new Setting(c)
+		this.source.enabled = true;
+
+		const nameSetting = new Setting(c)
 			.setName(t('settings', 'externalCalendarName'))
 			.setDesc(t('settings', 'externalCalendarNameDesc'))
 			.addText(text => {
 				text.inputEl.addClass('operon-external-calendar-name-input');
 				text.setValue(this.source.name);
 				text.onChange(value => { this.source.name = value; });
-			})
-			.settingEl.addClass('operon-external-calendar-name-setting');
+			});
+		nameSetting.settingEl.addClass('operon-external-calendar-name-setting');
 
 		const urlSetting = new Setting(c)
 			.setName(t('settings', 'externalCalendarUrl'))
@@ -154,6 +153,7 @@ export class ExternalCalendarSourceEditModal extends Modal {
 		}
 		this.source.url = url;
 		this.source.name = this.source.name.trim();
+		this.source.enabled = true;
 		this.didSave = true;
 		await this.opts.onSave(this.source);
 		this.close();

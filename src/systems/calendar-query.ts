@@ -19,10 +19,12 @@ export interface CalendarQueryResult {
 	items: CalendarItem[];
 }
 
+type CalendarQueryPreset = Pick<CalendarPreset, 'dayCount' | 'showWeekends' | 'todayPosition'> & Partial<Pick<CalendarPreset, 'showProjectedOccurrences'>>;
+
 export function queryCalendarItems(
 	tasks: IndexedTask[],
 	anchorDate: string,
-	preset: Pick<CalendarPreset, 'dayCount' | 'showWeekends' | 'todayPosition'>,
+	preset: CalendarQueryPreset,
 	repeatSeriesEntries: RepeatSeriesEntry[] = [],
 ): CalendarQueryResult {
 	const visibleDates = buildVisibleCalendarDates(anchorDate, preset.dayCount, preset.showWeekends, preset.todayPosition);
@@ -35,12 +37,14 @@ export function queryCalendarItems(
 		items.push(...deriveCalendarItemsForTask(task, rangeStart, rangeEnd, latestOccurrenceBySeries));
 	}
 
-	items.push(...buildProjectedRecurringCalendarItems({
-		tasks,
-		entries: repeatSeriesEntries,
-		rangeStart,
-		rangeEnd,
-	}));
+	if (preset.showProjectedOccurrences !== false) {
+		items.push(...buildProjectedRecurringCalendarItems({
+			tasks,
+			entries: repeatSeriesEntries,
+			rangeStart,
+			rangeEnd,
+		}));
+	}
 
 	items.sort((left, right) => {
 		const kindRank = getKindRank(left.kind) - getKindRank(right.kind);

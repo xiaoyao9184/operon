@@ -48,7 +48,14 @@ import {
 	type ContextualMenuContext,
 	type ResolvedContextualMenuAction,
 } from '../../core/contextual-menu-engine';
-import { resolveTaskColorSource } from '../../core/task-color-source';
+import {
+	CALENDAR_TASK_COLOR_SOURCES,
+	getNextTaskColorSource,
+	getTaskColorSourceIcon,
+	getTaskColorSourceLabel,
+	normalizeTaskColorSource,
+	resolveTaskColorSource,
+} from '../../core/task-color-source';
 import { ContextualHoverMenuController } from '../contextual-hover-menu';
 import {
 	resolveContextualHoverMenuPosition,
@@ -218,6 +225,10 @@ export interface CalendarViewCallbacks {
 	onOpenDailyNote?: (dateKey: string) => void | Promise<void>;
 	onToggleAllDayLaneVisibility?: (nextValue: boolean) => void | Promise<void>;
 	onToggleDueLaneVisibility?: (nextValue: boolean) => void | Promise<void>;
+	onToggleProjectedOccurrences?: (presetId: string, nextValue: boolean) => void | Promise<void>;
+	onToggleExternalCalendars?: (presetId: string, nextValue: boolean) => void | Promise<void>;
+	onCycleTaskColorSource?: (presetId: string, nextSource: CalendarPreset['colorSource']) => void | Promise<void>;
+	onSyncExternalCalendars?: () => void | Promise<void>;
 	onExternalItemCreateTask?: (seed: ExternalCalendarTaskSeed) => void | Promise<void>;
 	onCalendarDragInteractionEnd?: () => void | Promise<void>;
 }
@@ -673,6 +684,7 @@ export class CalendarView extends ItemView {
 					dayCount: this.getMultiWeekVisibleDayCount(preset),
 					showWeekends: preset.showWeekends,
 					todayPosition: 1,
+					showProjectedOccurrences: preset.showProjectedOccurrences,
 				}
 				: preset;
 			const query = queryCalendarItems(
@@ -692,6 +704,7 @@ export class CalendarView extends ItemView {
 						dayCount: timedRenderWindow.bufferedDates.length,
 						showWeekends: preset.showWeekends,
 						todayPosition: timedRenderWindow.bufferDaysBefore + 1,
+						showProjectedOccurrences: preset.showProjectedOccurrences,
 					},
 					this.getRepeatSeriesEntries(),
 				)
@@ -908,7 +921,8 @@ export class CalendarView extends ItemView {
 				dayCount: this.getMultiWeekVisibleDayCount(preset),
 				showWeekends: preset.showWeekends,
 				todayPosition: 1,
-		}
+				showProjectedOccurrences: preset.showProjectedOccurrences,
+			}
 			: preset;
 		const query = queryCalendarItems(
 			scopedTasks,
@@ -927,6 +941,7 @@ export class CalendarView extends ItemView {
 					dayCount: timedRenderWindow.bufferedDates.length,
 					showWeekends: preset.showWeekends,
 					todayPosition: timedRenderWindow.bufferDaysBefore + 1,
+					showProjectedOccurrences: preset.showProjectedOccurrences,
 				},
 				this.getRepeatSeriesEntries(),
 			)
@@ -1311,6 +1326,108 @@ export class CalendarView extends ItemView {
 		return scroll.createDiv('operon-calendar-surface');
 	}
 
+	private renderCalendarQuickActions(
+		container: HTMLElement,
+		preset: CalendarPreset,
+		placement: 'toolbar' | 'sidebar',
+	): HTMLElement {
+		const actions = container.createDiv(`operon-calendar-quick-actions is-${placement}`);
+		const showProjectedOccurrences = preset.showProjectedOccurrences !== false;
+		const projectedLabel = showProjectedOccurrences
+			? t('calendar', 'hideFutureOccurrences')
+			: t('calendar', 'showFutureOccurrences');
+		const projectedButton = actions.createEl('button', {
+			cls: 'operon-calendar-quick-action-button',
+			attr: {
+				type: 'button',
+				'aria-pressed': String(showProjectedOccurrences),
+			},
+		});
+		projectedButton.classList.toggle('is-on', showProjectedOccurrences);
+		projectedButton.classList.toggle('is-off', !showProjectedOccurrences);
+		setIcon(projectedButton, showProjectedOccurrences ? 'eye' : 'eye-off');
+		setAccessibleLabelWithoutTooltip(projectedButton, projectedLabel);
+		bindOperonHoverTooltip(projectedButton, { content: projectedLabel, taskColor: null });
+		projectedButton.addEventListener('click', (event) => {
+			event.preventDefault();
+			void this.callbacks.onToggleProjectedOccurrences?.(preset.id, !showProjectedOccurrences);
+		});
+
+			const selectedExternalCalendarCount = this.getSettings().externalCalendars
+				.filter(source => source.enabled && preset.externalCalendarVisibility[source.id] === true)
+				.length;
+		const hasSelectedExternalCalendars = selectedExternalCalendarCount > 0;
+		const showExternalCalendars = preset.showExternalCalendars !== false;
+		const externalCalendarsLabel = hasSelectedExternalCalendars
+			? showExternalCalendars
+				? t('calendar', 'hideExternalCalendars')
+				: t('calendar', 'showExternalCalendars')
+			: t('calendar', 'noExternalCalendarsSelectedForPreset');
+		const externalCalendarsButton = actions.createEl('button', {
+			cls: 'operon-calendar-quick-action-button',
+			attr: {
+				type: 'button',
+				'aria-pressed': String(showExternalCalendars && hasSelectedExternalCalendars),
+				'aria-disabled': String(!hasSelectedExternalCalendars),
+			},
+		});
+		externalCalendarsButton.classList.toggle('is-on', showExternalCalendars && hasSelectedExternalCalendars);
+		externalCalendarsButton.classList.toggle('is-off', !showExternalCalendars || !hasSelectedExternalCalendars);
+		externalCalendarsButton.classList.toggle('is-disabled', !hasSelectedExternalCalendars);
+		setIcon(externalCalendarsButton, showExternalCalendars && hasSelectedExternalCalendars ? 'calendar-check' : 'calendar-off');
+		setAccessibleLabelWithoutTooltip(externalCalendarsButton, externalCalendarsLabel);
+		bindOperonHoverTooltip(externalCalendarsButton, { content: externalCalendarsLabel, taskColor: null });
+		externalCalendarsButton.addEventListener('click', (event) => {
+			event.preventDefault();
+			if (!hasSelectedExternalCalendars) return;
+			void this.callbacks.onToggleExternalCalendars?.(preset.id, !showExternalCalendars);
+		});
+
+		const currentColorSource = normalizeTaskColorSource(preset.colorSource, CALENDAR_TASK_COLOR_SOURCES, 'taskColor');
+		const nextColorSource = getNextTaskColorSource(currentColorSource, CALENDAR_TASK_COLOR_SOURCES, 'taskColor');
+		const colorSourceLabel = t('calendar', 'cycleTaskColorSourceTooltip', {
+			current: getTaskColorSourceLabel(currentColorSource),
+			next: getTaskColorSourceLabel(nextColorSource),
+		});
+		const colorSourceButton = actions.createEl('button', {
+			cls: 'operon-calendar-quick-action-button',
+			attr: { type: 'button' },
+		});
+		setIcon(colorSourceButton, getTaskColorSourceIcon(currentColorSource));
+		setAccessibleLabelWithoutTooltip(colorSourceButton, colorSourceLabel);
+		bindOperonHoverTooltip(colorSourceButton, { content: colorSourceLabel, taskColor: null });
+		colorSourceButton.addEventListener('click', (event) => {
+			event.preventDefault();
+			void this.callbacks.onCycleTaskColorSource?.(preset.id, nextColorSource);
+		});
+
+		const syncExternalCalendarsLabel = t('commands', 'updateExternalCalendars');
+		const syncExternalCalendarsButton = actions.createEl('button', {
+			cls: 'operon-calendar-quick-action-button',
+			attr: { type: 'button' },
+		});
+		setIcon(syncExternalCalendarsButton, 'calendar-sync');
+		setAccessibleLabelWithoutTooltip(syncExternalCalendarsButton, syncExternalCalendarsLabel);
+		bindOperonHoverTooltip(syncExternalCalendarsButton, { content: syncExternalCalendarsLabel, taskColor: null });
+		syncExternalCalendarsButton.addEventListener('click', (event) => {
+			event.preventDefault();
+			void this.callbacks.onSyncExternalCalendars?.();
+		});
+
+		const settingsButton = actions.createEl('button', {
+			cls: 'operon-calendar-quick-action-button',
+			attr: { type: 'button' },
+		});
+		setIcon(settingsButton, 'settings-2');
+		setAccessibleLabelWithoutTooltip(settingsButton, t('calendar', 'editCurrentCalendarPreset'));
+		bindOperonHoverTooltip(settingsButton, { content: t('calendar', 'editCurrentCalendarPreset'), taskColor: null });
+		settingsButton.addEventListener('click', (event) => {
+			event.preventDefault();
+			void this.callbacks.onOpenPresetSettings?.(preset.id);
+		});
+		return actions;
+	}
+
 	private renderSidebar(
 		container: HTMLElement,
 		state: CalendarLeafState,
@@ -1337,6 +1454,7 @@ export class CalendarView extends ItemView {
 			});
 
 		this.renderMiniMonth(container, state, preset);
+		this.renderCalendarQuickActions(container, preset, 'sidebar');
 
 		const sectionsWrapper = container.createDiv('operon-calendar-sidebar-pools-wrapper');
 		const presetSection = sectionsWrapper.createDiv('operon-calendar-sidebar-section operon-calendar-sidebar-calendars-section operon-calendar-sidebar-managed-section');
@@ -1378,19 +1496,6 @@ export class CalendarView extends ItemView {
 						...state,
 						presetId: entry.id,
 					});
-				});
-
-				const gear = row.createEl('button', {
-					cls: 'operon-calendar-sidebar-preset-gear',
-					attr: { type: 'button' },
-				});
-				setIcon(gear, 'settings-2');
-				setAccessibleLabelWithoutTooltip(gear, t('calendar', 'editPreset', { name: entry.name }));
-				bindOperonHoverTooltip(gear, { content: t('calendar', 'editPreset', { name: entry.name }), taskColor: null });
-				gear.addEventListener('click', (event) => {
-					event.preventDefault();
-					event.stopPropagation();
-					void this.callbacks.onOpenPresetSettings?.(entry.id);
 				});
 			}
 		}
@@ -2517,17 +2622,7 @@ export class CalendarView extends ItemView {
 				presetId: presetSelect.value,
 			});
 		});
-				const settingsButton = controlsGroup.createEl('button', {
-					cls: 'operon-calendar-toolbar-settings-button',
-					attr: { type: 'button' },
-				});
-				setIcon(settingsButton, 'settings-2');
-				setAccessibleLabelWithoutTooltip(settingsButton, t('calendar', 'editPreset', { name: preset.name }));
-				bindOperonHoverTooltip(settingsButton, { content: t('calendar', 'editPreset', { name: preset.name }), taskColor: null });
-		settingsButton.addEventListener('click', () => {
-			if (!preset.id) return;
-			void this.callbacks.onOpenPresetSettings?.(preset.id);
-		});
+		this.renderCalendarQuickActions(controlsGroup, preset, 'toolbar');
 
 		this.applyToolbarLayoutMode(toolbar, titleGroup, navGroup, controlsGroup);
 	}

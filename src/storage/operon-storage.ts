@@ -58,6 +58,7 @@ const CONTEXTUAL_MENU_SETTINGS_KEYS = [
 ] as const;
 const TASK_UI_PREFERENCE_SETTINGS_KEYS = [
 	'taskCreatorToolbar',
+	'taskEditorWorkflowPickers',
 	'inlineExpandedTaskChips',
 	'inlineTaskCompactChips',
 	'filterTaskCompactChips',
@@ -82,6 +83,7 @@ const TASK_CREATION_PROFILE_SETTINGS_KEYS = [
 	'taskDescriptionRequired',
 	'assigneesRequired',
 	'fileTasksFolder',
+	'inlineTaskSaveMode',
 	'inlineTaskUseDailyNote',
 	'inlineTaskTargetFile',
 	'inlineTaskHeading',
@@ -96,6 +98,10 @@ const TASK_AUTOMATION_POLICY_SETTINGS_KEYS = [
 	'autoCompleteParentWhenAllChildrenTerminal',
 	'cascadeCancelToDescendants',
 	'newOccurrencePosition',
+	'fileTaskAutoArchiveEnabled',
+	'fileTaskArchiveFolder',
+	'fileTaskArchiveDelaySeconds',
+	'fileTaskArchiveOnlyFromFileTasksFolder',
 	'fileRepeatDestination',
 	'fileRepeatCustomFolder',
 	'estimateAutoReallocation',
@@ -146,6 +152,7 @@ function pickContextualMenuStoreSettings(settings: OperonSettings): ContextualMe
 function pickTaskUiPreferenceStoreSettings(settings: OperonSettings): TaskUiPreferenceStoreSettings {
 	return {
 		taskCreatorToolbar: settings.taskCreatorToolbar,
+		taskEditorWorkflowPickers: settings.taskEditorWorkflowPickers,
 		inlineExpandedTaskChips: settings.inlineExpandedTaskChips,
 		inlineTaskCompactChips: settings.inlineTaskCompactChips,
 		filterTaskCompactChips: settings.filterTaskCompactChips,
@@ -173,6 +180,7 @@ function pickTaskCreationProfileStoreSettings(settings: OperonSettings): TaskCre
 		taskDescriptionRequired: settings.taskDescriptionRequired,
 		assigneesRequired: settings.assigneesRequired,
 		fileTasksFolder: settings.fileTasksFolder,
+		inlineTaskSaveMode: settings.inlineTaskSaveMode,
 		inlineTaskUseDailyNote: settings.inlineTaskUseDailyNote,
 		inlineTaskTargetFile: settings.inlineTaskTargetFile,
 		inlineTaskHeading: settings.inlineTaskHeading,
@@ -190,6 +198,10 @@ function pickTaskAutomationPolicyStoreSettings(settings: OperonSettings): TaskAu
 		autoCompleteParentWhenAllChildrenTerminal: settings.autoCompleteParentWhenAllChildrenTerminal,
 		cascadeCancelToDescendants: settings.cascadeCancelToDescendants,
 		newOccurrencePosition: settings.newOccurrencePosition,
+		fileTaskAutoArchiveEnabled: settings.fileTaskAutoArchiveEnabled,
+		fileTaskArchiveFolder: settings.fileTaskArchiveFolder,
+		fileTaskArchiveDelaySeconds: settings.fileTaskArchiveDelaySeconds,
+		fileTaskArchiveOnlyFromFileTasksFolder: settings.fileTaskArchiveOnlyFromFileTasksFolder,
 		fileRepeatDestination: settings.fileRepeatDestination,
 		fileRepeatCustomFolder: settings.fileRepeatCustomFolder,
 		estimateAutoReallocation: settings.estimateAutoReallocation,
@@ -302,8 +314,9 @@ export class OperonStorage {
 		const hadPersistedTaskCreationProfile = hasAnyPersistedKey(this.loadedSettingsSource, TASK_CREATION_PROFILE_SETTINGS_KEYS);
 		const hadPersistedTaskAutomationPolicy = hasAnyPersistedKey(this.loadedSettingsSource, TASK_AUTOMATION_POLICY_SETTINGS_KEYS);
 		const hadLegacyAgentExportSettings = hasAnyPersistedKey(this.loadedSettingsSource, LEGACY_AGENT_EXPORT_SETTINGS_KEYS);
+		const hadTaskUiPreferenceStore = await this.taskUiPreferenceStore.exists();
 		const shouldSeedTaskUiPreferencesFromSettings = hadPersistedTaskUiPreferenceKeys
-			|| (hasLegacyTaskBarChipSettings(this.loadedSettingsSource) && !(await this.taskUiPreferenceStore.exists()));
+			|| (!hadTaskUiPreferenceStore && (hadSettingsFile || hasLegacyTaskBarChipSettings(this.loadedSettingsSource)));
 		await this.keyMappingStore.load(hadPersistedKeyMappings ? this.settings.keyMappings : null, DEFAULT_SETTINGS.keyMappings);
 		await this.filterStore.load(hadPersistedFilters ? this.settings.filterSets : []);
 		if (!hadSettingsFile && !hadPersistedFilters && this.filterStore.getAll().length === 0) {
@@ -461,6 +474,7 @@ export class OperonStorage {
 		delete persistedSettings.contextualMenuSurfaceActionMatrix;
 		delete persistedSettings.contextualMenuOpenDelayMs;
 		delete persistedSettings.taskCreatorToolbar;
+		delete persistedSettings.taskEditorWorkflowPickers;
 		delete persistedSettings.inlineExpandedTaskChips;
 		delete persistedSettings.inlineTaskCompactChips;
 		delete persistedSettings.filterTaskCompactChips;
@@ -484,6 +498,7 @@ export class OperonStorage {
 		delete persistedSettings.taskDescriptionRequired;
 		delete persistedSettings.assigneesRequired;
 		delete persistedSettings.fileTasksFolder;
+		delete persistedSettings.inlineTaskSaveMode;
 		delete persistedSettings.inlineTaskUseDailyNote;
 		delete persistedSettings.inlineTaskTargetFile;
 		delete persistedSettings.inlineTaskHeading;
@@ -496,6 +511,10 @@ export class OperonStorage {
 		delete persistedSettings.autoCompleteParentWhenAllChildrenTerminal;
 		delete persistedSettings.cascadeCancelToDescendants;
 		delete persistedSettings.newOccurrencePosition;
+		delete persistedSettings.fileTaskAutoArchiveEnabled;
+		delete persistedSettings.fileTaskArchiveFolder;
+		delete persistedSettings.fileTaskArchiveDelaySeconds;
+		delete persistedSettings.fileTaskArchiveOnlyFromFileTasksFolder;
 		delete persistedSettings.fileRepeatDestination;
 		delete persistedSettings.fileRepeatCustomFolder;
 		delete persistedSettings.estimateAutoReallocation;

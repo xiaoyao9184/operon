@@ -12,6 +12,7 @@ export type TaskCreationProfileStoreSettings = Pick<
 	| 'taskDescriptionRequired'
 	| 'assigneesRequired'
 	| 'fileTasksFolder'
+	| 'inlineTaskSaveMode'
 	| 'inlineTaskUseDailyNote'
 	| 'inlineTaskTargetFile'
 	| 'inlineTaskHeading'
@@ -43,15 +44,34 @@ function readNumber(value: unknown, fallback: number): number {
 	return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function readInlineTaskSaveMode(
+	raw: Partial<TaskCreationProfileStoreData>,
+	fallback: TaskCreationProfileStoreSettings,
+): TaskCreationProfileStoreSettings['inlineTaskSaveMode'] {
+	if (
+		raw.inlineTaskSaveMode === 'daily-notes'
+		|| raw.inlineTaskSaveMode === 'specific-file'
+		|| raw.inlineTaskSaveMode === 'active-file'
+		|| raw.inlineTaskSaveMode === 'ask-every-time'
+	) {
+		return raw.inlineTaskSaveMode;
+	}
+	return raw.inlineTaskUseDailyNote === false
+		? 'specific-file'
+		: fallback.inlineTaskSaveMode;
+}
+
 function readStoreData(
 	raw: Partial<TaskCreationProfileStoreData>,
 	fallback: TaskCreationProfileStoreSettings,
 ): TaskCreationProfileStoreSettings {
+	const inlineTaskSaveMode = readInlineTaskSaveMode(raw, fallback);
 	return {
 		taskDescriptionRequired: readBoolean(raw.taskDescriptionRequired, fallback.taskDescriptionRequired),
 		assigneesRequired: readBoolean(raw.assigneesRequired, fallback.assigneesRequired),
 		fileTasksFolder: readString(raw.fileTasksFolder, fallback.fileTasksFolder),
-		inlineTaskUseDailyNote: readBoolean(raw.inlineTaskUseDailyNote, fallback.inlineTaskUseDailyNote),
+		inlineTaskSaveMode,
+		inlineTaskUseDailyNote: inlineTaskSaveMode === 'daily-notes',
 		inlineTaskTargetFile: readString(raw.inlineTaskTargetFile, fallback.inlineTaskTargetFile),
 		inlineTaskHeading: readString(raw.inlineTaskHeading, fallback.inlineTaskHeading),
 		calendarInlineTaskHeading: readString(raw.calendarInlineTaskHeading, fallback.calendarInlineTaskHeading),

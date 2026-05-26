@@ -11,7 +11,7 @@ import { PinnedCache } from '../storage/pinned-cache';
 
 import { IndexedTask, ParsedTask, OperonField } from '../types/fields';
 import { CANONICAL_KEY_MAP } from '../types/keys';
-import { OperonSettings } from '../types/settings';
+import { OperonSettings, TaskEditorWorkflowPickerKey } from '../types/settings';
 import { generateOperonId, generateRepeatSeriesId } from '../core/id-generator';
 import {
 	resolveAutomationWorkflowStatus,
@@ -65,6 +65,8 @@ import { showAssigneesPicker } from './field-pickers/assignees-picker';
 import { showParentTaskPicker } from './field-pickers/parent-task-picker';
 import { showSubtasksPicker } from './field-pickers/subtasks-picker';
 import { showDependencyTaskPicker } from './field-pickers/dependency-task-picker';
+import { showLinksPicker } from './field-pickers/links-picker';
+import { formatExternalLinkDisplay } from './field-pickers/links-utils';
 import { splitTaskListValue } from '../core/task-field-patch';
 import { splitFrontmatterDocument } from '../core/file-task-template-merge';
 import { formatContextDisplay } from './field-pickers/contexts-picker';
@@ -717,15 +719,7 @@ export class TaskEditorContent {
 
 		// High-frequency fields directly under description
 		this.renderCoreSection(container);
-		this.renderContextsPicker(container);
-
-		// Workflow-related picker surfaces
-		this.renderTags(container);
-		this.renderAssigneesPicker(container);
-		this.renderParentTaskPicker(container);
-		this.renderSubtaskPicker(container);
-		this.renderTaskListPicker(container, 'blocking', t('taskEditor', 'blocking'));
-		this.renderTaskListPicker(container, 'blockedBy', t('taskEditor', 'blockedBy'));
+		this.renderWorkflowPickers(container);
 		this.renderDetailsSection(container);
 
 		// Actions bar
@@ -1761,6 +1755,42 @@ export class TaskEditorContent {
 			next => { this.workflowExpanded = next; },
 			body => this.renderWorkflowFields(body),
 		);
+	}
+
+	private renderWorkflowPickers(container: HTMLElement): void {
+		for (const item of this.settings.taskEditorWorkflowPickers) {
+			if (!item.visible) continue;
+			this.renderWorkflowPicker(container, item.key);
+		}
+	}
+
+	private renderWorkflowPicker(container: HTMLElement, key: TaskEditorWorkflowPickerKey): void {
+		switch (key) {
+			case 'contexts':
+				this.renderContextsPicker(container);
+				break;
+			case 'tags':
+				this.renderTags(container);
+				break;
+			case 'assignees':
+				this.renderAssigneesPicker(container);
+				break;
+			case 'links':
+				this.renderLinksPicker(container);
+				break;
+			case 'parentTask':
+				this.renderParentTaskPicker(container);
+				break;
+			case 'subtasks':
+				this.renderSubtaskPicker(container);
+				break;
+			case 'blocking':
+				this.renderTaskListPicker(container, 'blocking', t('taskEditor', 'blocking'));
+				break;
+			case 'blockedBy':
+				this.renderTaskListPicker(container, 'blockedBy', t('taskEditor', 'blockedBy'));
+				break;
+		}
 	}
 
 	private renderDetailsSection(container: HTMLElement): void {
@@ -2813,12 +2843,76 @@ export class TaskEditorContent {
 		render();
 	}
 
+	private renderLinksPicker(group: HTMLElement): void {
+		const setting = new Setting(group);
+		setting.settingEl.addClass('operon-links-setting', 'operon-editor-links-setting');
+		const stack = setting.controlEl.createDiv('operon-editor-picker-stack');
+		const anchor = this.createPickerAnchor(stack, t('taskEditor', 'links'), {
+			leadingIcon: this.resolveCompactChipIcon('links'),
+		});
+		const selectedWrap = stack.createDiv('operon-editor-picker-selected operon-editor-link-selection-row');
+
+		let selectedValues = normalizeListValues(splitTaskListValue(this.fieldValues['links']));
+		let closePicker: (() => void) | null = null;
+
+		const closeActivePicker = () => {
+			if (!closePicker) return;
+			const current = closePicker;
+			closePicker = null;
+			anchor.removeClass('is-picker-open');
+			current();
+		};
+
+		const render = () => {
+			this.renderCompactSelectionChips(selectedWrap, 'links', selectedValues, (value) => {
+				closeActivePicker();
+				selectedValues = selectedValues.filter(existing => existing !== value);
+				this.setDelimitedFieldValue('links', selectedValues);
+				render();
+				this.markEdited();
+			}, formatExternalLinkDisplay);
+		};
+
+		const openPicker = () => {
+			if (closePicker) return;
+			closePicker = showLinksPicker(anchor, {
+				app: this.app,
+				settingsKeyMappings: this.settings.keyMappings,
+				allTasks: this.indexer.getAllTasks(),
+				value: selectedValues,
+				closeOnSelect: false,
+				onSave: (values) => {
+					const nextValues = normalizeListValues(values);
+					if (areStringArraysEqual(selectedValues, nextValues)) return;
+					selectedValues = nextValues;
+					this.setDelimitedFieldValue('links', nextValues);
+					render();
+					this.markEdited();
+				},
+				onClose: () => {
+					closePicker = null;
+					anchor.removeClass('is-picker-open');
+				},
+			});
+			anchor.addClass('is-picker-open');
+		};
+
+		anchor.addEventListener('click', (event) => {
+			event.preventDefault();
+			openPicker();
+		});
+		anchor.addEventListener('keydown', (event) => {
+			if (event.key !== 'Enter' && event.key !== ' ') return;
+			event.preventDefault();
+			openPicker();
+		});
+
+		this.setDelimitedFieldValue('links', selectedValues);
+		render();
+	}
+
 	private renderWorkflowFields(container: HTMLElement): void {
-		this.renderAssigneesPicker(container);
-		this.renderParentTaskPicker(container);
-		this.renderSubtaskPicker(container);
-		this.renderTaskListPicker(container, 'blocking', t('taskEditor', 'blocking'));
-		this.renderTaskListPicker(container, 'blockedBy', t('taskEditor', 'blockedBy'));
+		this.renderWorkflowPickers(container);
 	}
 
 	private renderContextsPicker(group: HTMLElement): void {

@@ -5666,6 +5666,7 @@ body .operon-task-editor-file-panel .operon-task-editor-file-source-editor.markd
 }
 
 .operon-editor-assignees-setting .setting-item-info,
+.operon-editor-links-setting .setting-item-info,
 .operon-editor-parent-setting .setting-item-info,
 .operon-editor-inline-picker-setting .setting-item-info,
 .operon-editor-tags-setting .setting-item-info {
@@ -5678,6 +5679,7 @@ body .operon-task-editor-file-panel .operon-task-editor-file-source-editor.markd
 }
 
 .operon-editor-assignees-setting .setting-item-control,
+.operon-editor-links-setting .setting-item-control,
 .operon-editor-parent-setting .setting-item-control,
 .operon-editor-inline-picker-setting .setting-item-control,
 .operon-editor-tags-setting .setting-item-control {
@@ -5692,6 +5694,7 @@ body .operon-task-editor-file-panel .operon-task-editor-file-source-editor.markd
 }
 
 .operon-editor-assignee-selection-row,
+.operon-editor-link-selection-row,
 .operon-editor-task-selection-row,
 .operon-editor-context-selection-row,
 .operon-editor-tag-selection-row {
@@ -9255,9 +9258,7 @@ body.operon-calendar-sidebar-is-resizing {
 .operon-calendar-sidebar-task-pool-toggle:hover,
 .operon-calendar-sidebar-task-pool-toggle:focus-visible,
 .operon-calendar-sidebar-preset-button:hover,
-.operon-calendar-sidebar-preset-button:focus-visible,
-.operon-calendar-sidebar-preset-gear:hover,
-.operon-calendar-sidebar-preset-gear:focus-visible {
+.operon-calendar-sidebar-preset-button:focus-visible {
 	border-color: var(--interactive-accent);
 	background: var(--background-modifier-hover);
 	outline: none;
@@ -9271,10 +9272,172 @@ body.operon-calendar-sidebar-is-resizing {
 	height: 14px;
 }
 
-.operon-calendar-sidebar-task-pool-toggle-icon svg,
-.operon-calendar-sidebar-preset-gear svg {
+.operon-calendar-sidebar-task-pool-toggle-icon svg {
 	width: 14px;
 	height: 14px;
+}
+
+.operon-calendar-quick-actions {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+}
+
+.operon-calendar-quick-actions.is-sidebar {
+	width: 100%;
+	justify-content: center;
+	padding: 0 2px 2px;
+}
+
+.operon-calendar-quick-action-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border-radius: 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.operon-calendar-quick-action-button.is-on {
+	color: var(--text-normal);
+}
+
+.operon-calendar-quick-action-button.is-disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.operon-calendar-quick-action-button:hover,
+.operon-calendar-quick-action-button:focus-visible {
+	outline: none;
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.operon-calendar-quick-action-button.is-disabled:hover,
+.operon-calendar-quick-action-button.is-disabled:focus-visible {
+	border-color: var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+}
+
+.operon-calendar-quick-action-button svg {
+	width: 14px;
+	height: 14px;
+}
+
+.operon-task-color-source-select-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+	min-width: 172px;
+}
+
+.operon-task-color-source-select-icon,
+.operon-task-color-source-select-chevron {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+}
+
+.operon-task-color-source-select-icon svg,
+.operon-task-color-source-select-chevron svg {
+	width: 14px;
+	height: 14px;
+}
+
+.operon-task-color-source-select-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	text-align: left;
+}
+
+.operon-task-color-source-select-chevron {
+	margin-left: auto;
+	color: var(--text-muted);
+}
+
+.operon-task-color-source-menu {
+	z-index: var(--layer-menu, 1000);
+	position: fixed;
+	top: var(--operon-task-color-source-menu-top, 0);
+	left: var(--operon-task-color-source-menu-left, 0);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: var(--operon-task-color-source-menu-min-width, 220px);
+	padding: 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+}
+
+.operon-task-color-source-menu.is-positioning {
+	visibility: hidden;
+}
+
+.operon-task-color-source-menu-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 34px;
+	padding: 6px 9px;
+	border: 0;
+	border-radius: 7px;
+	background: transparent;
+	color: var(--text-normal);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.operon-task-color-source-menu-item:hover,
+.operon-task-color-source-menu-item:focus-visible {
+	background: var(--background-modifier-hover);
+	outline: none;
+}
+
+.operon-task-color-source-menu-item.is-selected {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.operon-task-color-source-menu-item-icon,
+.operon-task-color-source-menu-item-selected-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 16px;
+	height: 16px;
+}
+
+.operon-task-color-source-menu-item-icon svg,
+.operon-task-color-source-menu-item-selected-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.operon-task-color-source-menu-item-label {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.operon-task-color-source-menu-item-selected-icon {
+	margin-left: auto;
 }
 
 .operon-calendar-sidebar-section {
@@ -9317,31 +9480,6 @@ body.operon-calendar-sidebar-is-resizing {
 	text-align: left;
 	font-size: var(--font-ui-small);
 	cursor: pointer;
-}
-
-.operon-calendar-sidebar-preset-gear {
-	position: absolute;
-	top: 50%;
-	right: 6px;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 32px;
-	height: 32px;
-	padding: 0;
-	border-radius: 10px;
-	border: 1px solid var(--background-modifier-border);
-	background: var(--background-primary);
-	color: var(--text-muted);
-	opacity: 0;
-	cursor: pointer;
-	transform: translateY(-50%);
-	transition: opacity 120ms ease;
-}
-
-.operon-calendar-sidebar-preset-row:hover .operon-calendar-sidebar-preset-gear,
-.operon-calendar-sidebar-preset-row:focus-within .operon-calendar-sidebar-preset-gear {
-	opacity: 1;
 }
 
 .operon-calendar-sidebar-task-pool-modes {
@@ -9578,8 +9716,7 @@ body.operon-calendar-sidebar-is-resizing {
 }
 
 .operon-calendar-toolbar-button,
-.operon-calendar-preset-select,
-.operon-calendar-toolbar-settings-button {
+.operon-calendar-preset-select {
 	height: 30px;
 	border-radius: 8px;
 	border: 1px solid var(--background-modifier-border);
@@ -9594,14 +9731,12 @@ body.operon-calendar-sidebar-is-resizing {
 }
 
 .operon-calendar-toolbar-button:hover,
-.operon-calendar-preset-select:hover,
-.operon-calendar-toolbar-settings-button:hover {
+.operon-calendar-preset-select:hover {
 	background: var(--background-modifier-hover);
 	border-color: var(--interactive-accent);
 }
 
-.operon-calendar-toolbar-button.is-icon-only,
-.operon-calendar-toolbar-settings-button {
+.operon-calendar-toolbar-button.is-icon-only {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -9621,8 +9756,7 @@ body.operon-calendar-sidebar-is-resizing {
 	margin-left: 6px;
 }
 
-.operon-calendar-toolbar-icon svg,
-.operon-calendar-toolbar-settings-button svg {
+.operon-calendar-toolbar-icon svg {
 	width: 14px;
 	height: 14px;
 }
@@ -10839,6 +10973,13 @@ body.operon-calendar-sidebar-is-resizing {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-error);
 	word-break: break-word;
+}
+
+.operon-external-calendar-preset-note {
+	margin: 0 0 14px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	line-height: 1.4;
 }
 
 .operon-external-calendar-name-input {

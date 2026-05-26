@@ -1,15 +1,21 @@
 import { App } from 'obsidian';
-import { InlineExpandedTaskChips, OperonSettings } from '../types/settings';
+import {
+	buildCompatibilityTaskEditorWorkflowPickerItems,
+	InlineExpandedTaskChips,
+	normalizeTaskEditorWorkflowPickers,
+	OperonSettings,
+} from '../types/settings';
 import { WriteQueue } from './write-queue';
 import { preserveInvalidJsonFile, shouldSkipStoreWrite, writeJsonSafely, type RecoveredStoreWriteOptions } from './storage-file-ops';
 
 const TASK_UI_PREFERENCES_FILE = '.operon/task-ui-preferences.json';
-const TASK_UI_PREFERENCE_STORE_VERSION = 1;
+const TASK_UI_PREFERENCE_STORE_VERSION = 2;
 const TASK_UI_PREFERENCE_STORE_QUEUE_KEY = `${TASK_UI_PREFERENCES_FILE}::__store__`;
 
 export type TaskUiPreferenceStoreSettings = Pick<
 	OperonSettings,
 	| 'taskCreatorToolbar'
+	| 'taskEditorWorkflowPickers'
 	| 'inlineExpandedTaskChips'
 	| 'inlineTaskCompactChips'
 	| 'filterTaskCompactChips'
@@ -38,6 +44,7 @@ interface TaskUiPreferenceStoreData extends TaskUiPreferenceStoreSettings {
 function cloneSettings(settings: TaskUiPreferenceStoreSettings): TaskUiPreferenceStoreSettings {
 	return {
 		taskCreatorToolbar: settings.taskCreatorToolbar.map(item => ({ ...item })),
+		taskEditorWorkflowPickers: settings.taskEditorWorkflowPickers.map(item => ({ ...item })),
 		inlineExpandedTaskChips: { ...settings.inlineExpandedTaskChips },
 		inlineTaskCompactChips: settings.inlineTaskCompactChips.map(item => ({ ...item })),
 		filterTaskCompactChips: settings.filterTaskCompactChips.map(item => ({ ...item })),
@@ -100,6 +107,12 @@ function readStoreData(
 ): TaskUiPreferenceStoreSettings {
 	return {
 		taskCreatorToolbar: readArray(raw.taskCreatorToolbar, fallback.taskCreatorToolbar),
+		taskEditorWorkflowPickers: normalizeTaskEditorWorkflowPickers(
+			raw.taskEditorWorkflowPickers,
+			raw.taskEditorWorkflowPickers === undefined
+				? buildCompatibilityTaskEditorWorkflowPickerItems()
+				: fallback.taskEditorWorkflowPickers,
+		),
 		inlineExpandedTaskChips: readInlineExpandedTaskChips(
 			raw.inlineExpandedTaskChips ?? raw.taskBarChips,
 			fallback.inlineExpandedTaskChips,

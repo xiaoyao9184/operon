@@ -13,7 +13,7 @@
 
 import { AbstractInputSuggest, App, Notice, Plugin, PluginSettingTab, Setting, TFile, TFolder, ToggleComponent, getIcon, setIcon } from 'obsidian';
 import type { DropdownComponent, TextComponent } from 'obsidian';
-import { OperonSettings, DEFAULT_SETTINGS, DEFAULT_INLINE_TASK_TARGET_FILE, DEFAULT_INLINE_TASK_HEADING_KEYWORD, DEFAULT_INLINE_TASK_PARENT_FILE_HEADING_KEYWORD, KeyMapping, FilterSet, CALENDAR_TIME_GRID_SCALE_OPTIONS, CALENDAR_AUTO_SCROLL_POSITION_OPTIONS, CALENDAR_SIDEBAR_WIDTH_MIN, CALENDAR_SIDEBAR_WIDTH_MAX, KANBAN_EXPANDED_COLUMN_WIDTH_MIN, KANBAN_EXPANDED_COLUMN_WIDTH_MAX, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MIN, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MAX, createExternalCalendarSourceId, ExternalCalendarSource, TaskCreatorToolbarFieldKey, TaskCreatorToolbarItem, TASK_CREATOR_FALLBACK_FIELD_ICONS, InlineTaskCompactChipKey, INLINE_TASK_COMPACT_FALLBACK_ICONS, TrackerTaskDescriptionClickAction, TASK_FINDER_DEFAULT_SCOPE_ORDER, TaskFinderDefaultScopeKey, normalizeTaskFinderShortcutValue, FLOW_TIME_PAUSE_MINUTE_OPTIONS, FLOW_TIME_DEFAULT_SESSION_MINUTE_OPTIONS, cloneFilterSet, getNumericConstraint, isNumericSettingKey, normalizeCalendarSidebarDefaultExpansionState, normalizeInlineTaskHeadingKeyword, normalizeInlineTaskParentFileHeadingKeyword, setNumericSetting, type CalendarSidebarDefaultStateKey, type FallbackTaskIconSource } from '../types/settings';
+import { OperonSettings, DEFAULT_SETTINGS, DEFAULT_INLINE_TASK_TARGET_FILE, DEFAULT_INLINE_TASK_HEADING_KEYWORD, DEFAULT_INLINE_TASK_PARENT_FILE_HEADING_KEYWORD, KeyMapping, FilterSet, CALENDAR_TIME_GRID_SCALE_OPTIONS, CALENDAR_AUTO_SCROLL_POSITION_OPTIONS, CALENDAR_SIDEBAR_WIDTH_MIN, CALENDAR_SIDEBAR_WIDTH_MAX, KANBAN_EXPANDED_COLUMN_WIDTH_MIN, KANBAN_EXPANDED_COLUMN_WIDTH_MAX, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MIN, KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MAX, createExternalCalendarSourceId, ExternalCalendarSource, TaskCreatorToolbarFieldKey, TaskCreatorToolbarItem, TASK_CREATOR_FALLBACK_FIELD_ICONS, TaskEditorWorkflowPickerKey, TaskEditorWorkflowPickerItem, InlineTaskCompactChipKey, INLINE_TASK_COMPACT_FALLBACK_ICONS, TrackerTaskDescriptionClickAction, TASK_FINDER_DEFAULT_SCOPE_ORDER, TaskFinderDefaultScopeKey, normalizeTaskFinderShortcutValue, FLOW_TIME_PAUSE_MINUTE_OPTIONS, FLOW_TIME_DEFAULT_SESSION_MINUTE_OPTIONS, cloneFilterSet, getNumericConstraint, isNumericSettingKey, normalizeCalendarSidebarDefaultExpansionState, normalizeInlineTaskHeadingKeyword, normalizeInlineTaskParentFileHeadingKeyword, setNumericSetting, type CalendarSidebarDefaultStateKey, type FallbackTaskIconSource } from '../types/settings';
 import { clonePipeline, composeStatusValue, createPipelineId, createStatusId, Pipeline, StatusDefinition } from '../types/pipeline';
 import { PriorityDefinition, DEFAULT_PRIORITIES, clonePriorityDefinition, createPriorityId } from '../types/priority';
 import { CalendarPreset, createCalendarPresetId } from '../types/calendar';
@@ -122,6 +122,7 @@ import {
 import { renderCompactChipSettingsSection } from './settings/compact-chip-settings-renderer';
 import { runSettingsAsync, settingsAsyncHandler } from './settings/async-settings-action';
 import { parsePresetNumber } from './settings/preset-control-helpers';
+import { renderTaskColorSourceSelectButton, showTaskColorSourceSelectMenu } from './task-color-source-select';
 import { shouldRenderRepeatSeriesYamlRemovalRow } from './settings/repeat-yaml-removal-visibility';
 import { renderSettingsTabFramework, type SettingsTabDefinition } from './settings/settings-tab-framework';
 import {
@@ -191,7 +192,8 @@ type OperonSettingsSecondaryTabId =
 	| 'interfacePinnedDock'
 	| 'interfaceTaskFinder'
 	| 'interfaceContextMenu'
-	| 'interfaceStateIcons';
+	| 'interfaceStateIcons'
+	| 'interfaceTaskEditor';
 
 type OperonSettingsTabId = OperonSettingsPrimaryTabId | OperonSettingsSecondaryTabId;
 
@@ -544,6 +546,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			{ id: 'interfaceTaskFinder', groupId: 'interface', label: t('settings', 'subtabTaskFinder') },
 			{ id: 'interfaceContextMenu', groupId: 'interface', label: t('settings', 'subtabContextMenu') },
 			{ id: 'interfaceStateIcons', groupId: 'interface', label: t('settings', 'subtabStateIcons') },
+			{ id: 'interfaceTaskEditor', groupId: 'interface', label: t('settings', 'subtabTaskEditor') },
 		];
 	}
 
@@ -582,6 +585,8 @@ export class OperonSettingsTab extends PluginSettingTab {
 			this.renderInterfaceContextMenuTab(contentEl);
 		} else if (tabId === 'interfaceStateIcons') {
 			this.renderInterfaceStateIconsTab(contentEl);
+		} else if (tabId === 'interfaceTaskEditor') {
+			this.renderInterfaceTaskEditorTab(contentEl);
 		}
 	}
 
@@ -637,6 +642,11 @@ export class OperonSettingsTab extends PluginSettingTab {
 
 	private renderInterfaceContextMenuTab(containerEl: HTMLElement): void {
 		this.renderContextualHoverMenuSettingsSection(containerEl);
+	}
+
+	private renderInterfaceTaskEditorTab(containerEl: HTMLElement): void {
+		renderSettingsHeading(containerEl, t('settings', 'taskEditorWorkflowPickers'));
+		this.renderTaskEditorWorkflowPickerSettingsSection(containerEl);
 	}
 
 	private renderTasksRelationshipsTab(containerEl: HTMLElement): void {
@@ -717,14 +727,18 @@ export class OperonSettingsTab extends PluginSettingTab {
 		const dailyNotesAvailable = isDailyNotesCoreAvailable(this.app);
 		const effectiveInlineTaskSaveMode = resolveEffectiveInlineTaskSaveMode(this.settings, dailyNotesAvailable);
 
-		this.renderBoundDropdownSetting(containerEl, t('settings', 'inlineTaskDefaultSavePath'), t('settings', 'inlineTaskDefaultSavePathDesc'), 'inlineTaskUseDailyNote', {
+		this.renderBoundDropdownSetting(containerEl, t('settings', 'inlineTaskDefaultSavePath'), t('settings', 'inlineTaskDefaultSavePathDesc'), 'inlineTaskSaveMode', {
 			value: effectiveInlineTaskSaveMode,
 			dropdownOptions: [
 				{ value: 'daily-notes', label: t('settings', 'inlineTaskSavePathDailyNotes') },
 				{ value: 'specific-file', label: t('settings', 'inlineTaskSavePathSpecificFile') },
+				{ value: 'active-file', label: t('settings', 'inlineTaskSavePathActiveFile') },
+				{ value: 'ask-every-time', label: t('settings', 'inlineTaskSavePathAskEveryTime') },
 			],
-			normalize: value => value === 'daily-notes',
-			disabled: !dailyNotesAvailable,
+			normalize: value => value,
+			onBeforeSave: value => {
+				this.settings.inlineTaskUseDailyNote = value === 'daily-notes';
+			},
 			onAfterChange: () => {
 				this.display();
 			},
@@ -734,7 +748,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			placeholder: DEFAULT_INLINE_TASK_TARGET_FILE,
 			settingClass: 'operon-settings-long-text-setting',
 			controlClass: 'operon-settings-input-long',
-			disabled: effectiveInlineTaskSaveMode === 'daily-notes',
+			disabled: effectiveInlineTaskSaveMode !== 'specific-file',
 			configure: text => {
 				new FileSuggest(this.app, text.inputEl, settingsAsyncHandler('settings inline target file selection failed', async (file) => {
 					this.settings.inlineTaskTargetFile = file.path;
@@ -744,6 +758,9 @@ export class OperonSettingsTab extends PluginSettingTab {
 		});
 		this.decorateActivationSetting(targetFileSetting, effectiveInlineTaskSaveMode === 'specific-file');
 
+		const inlineHeadingActive = effectiveInlineTaskSaveMode === 'daily-notes'
+			|| effectiveInlineTaskSaveMode === 'active-file'
+			|| effectiveInlineTaskSaveMode === 'ask-every-time';
 		const inlineHeadingSetting = renderTextSetting({
 			containerEl,
 			name: t('settings', 'inlineTaskHeading'),
@@ -752,7 +769,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			placeholder: DEFAULT_INLINE_TASK_HEADING_KEYWORD,
 			settingClass: 'operon-settings-long-text-setting',
 			controlClass: 'operon-settings-input-long',
-			disabled: effectiveInlineTaskSaveMode !== 'daily-notes',
+			disabled: !inlineHeadingActive,
 			configure: text => {
 				text.inputEl.addEventListener('blur', settingsAsyncHandler('settings inline task heading keyword blur failed', async () => {
 					const normalized = normalizeInlineTaskHeadingKeyword(text.inputEl.value);
@@ -766,7 +783,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 				await this.saveSettings();
 			},
 		});
-		this.decorateActivationSetting(inlineHeadingSetting, effectiveInlineTaskSaveMode === 'daily-notes');
+		this.decorateActivationSetting(inlineHeadingSetting, inlineHeadingActive);
 
 		renderSettingsHeading(containerEl, t('settings', 'parentAwareInlineSaveLocation'));
 
@@ -1482,6 +1499,30 @@ export class OperonSettingsTab extends PluginSettingTab {
 		return basename.replace(/ - \d{4}-\d{2}-\d{2}(?: \(\d+\))?$/u, '').trim() || basename;
 	}
 
+	private renderTaskEditorWorkflowPickerSettingsSection(containerEl: HTMLElement): void {
+		renderInterfaceIconToggleSection<TaskEditorWorkflowPickerKey, TaskEditorWorkflowPickerItem>({
+			layout: 'row-list',
+			containerEl,
+			description: t('settings', 'taskEditorWorkflowPickersDesc'),
+			toggleTitle: t('settings', 'taskEditorWorkflowPickers'),
+			reorderTitle: t('settings', 'taskEditorWorkflowPickersReorder'),
+			moveUpLabel: t('settings', 'taskEditorWorkflowPickersMoveUp'),
+			moveDownLabel: t('settings', 'taskEditorWorkflowPickersMoveDown'),
+			getItems: () => this.settings.taskEditorWorkflowPickers,
+			setItems: items => {
+				this.settings.taskEditorWorkflowPickers = items;
+			},
+			getLabel: key => this.getTaskEditorWorkflowPickerLabel(key),
+			getIcon: key => this.getTaskEditorWorkflowPickerIcon(key),
+			getCanonicalLabel: key => `{{${key}:: }}`,
+			getVisibilityToggleLabel: label => t('settings', 'compactChipVisibilityToggle', { label }),
+			save: () => this.saveSettings(),
+			visibilityErrorContext: 'settings task editor workflow picker toggle failed',
+			iconOnlyErrorContext: 'settings task editor workflow picker icon-only toggle failed',
+			actionErrorContext: 'settings task editor workflow picker action toggle failed',
+		});
+	}
+
 	private renderTaskCreatorToolbarSettingsSection(containerEl: HTMLElement): void {
 		renderInterfaceIconToggleSection<TaskCreatorToolbarFieldKey, TaskCreatorToolbarItem>({
 			layout: 'row-list',
@@ -1642,6 +1683,22 @@ export class OperonSettingsTab extends PluginSettingTab {
 				},
 			],
 		});
+	}
+
+	private getTaskEditorWorkflowPickerLabel(key: TaskEditorWorkflowPickerKey): string {
+		if (key === 'tags') return t('taskEditor', 'tags');
+		if (key === 'contexts') return t('taskEditor', 'contexts');
+		if (key === 'assignees') return t('taskEditor', 'assignees');
+		if (key === 'links') return t('taskEditor', 'links');
+		if (key === 'parentTask') return t('taskEditor', 'parentTask');
+		if (key === 'subtasks') return t('taskEditor', 'subtasks');
+		if (key === 'blocking') return t('taskEditor', 'blocking');
+		return t('taskEditor', 'blockedBy');
+	}
+
+	private getTaskEditorWorkflowPickerIcon(key: TaskEditorWorkflowPickerKey): string {
+		const mapping = this.settings.keyMappings.find(candidate => candidate.canonicalKey === key);
+		return mapping?.icon?.trim() || TASK_CREATOR_FALLBACK_FIELD_ICONS[key];
 	}
 
 	private getTaskCreatorToolbarFieldLabel(key: TaskCreatorToolbarFieldKey): string {
@@ -2151,6 +2208,8 @@ export class OperonSettingsTab extends PluginSettingTab {
 				showAllDayLane: true,
 				showDueMarkers: true,
 				showWeekends: true,
+				showProjectedOccurrences: true,
+				showExternalCalendars: true,
 				hiddenTimeStart: '00:00',
 				hiddenTimeEnd: '06:00',
 				colorSource: 'taskColor',
@@ -2283,13 +2342,6 @@ export class OperonSettingsTab extends PluginSettingTab {
 			className: 'operon-external-calendar-card',
 		});
 
-		if (!source.enabled) {
-			createSettingsListCardChip({
-				containerEl: card.metaEl,
-				icon: 'eye-off',
-				label: t('settings', 'externalCalendarDisabled'),
-			});
-		}
 		createSettingsListCardChip({
 			containerEl: card.metaEl,
 			icon: 'clock',
@@ -2369,6 +2421,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 			source: clone,
 			isNew,
 			onSave: settingsAsyncHandler('settings external calendar edit failed', async (saved: ExternalCalendarSource) => {
+				saved.enabled = true;
 				const idx = this.settings.externalCalendars.findIndex(s => s.id === saved.id);
 				if (idx >= 0) this.settings.externalCalendars[idx] = saved;
 				await this.saveSettings();
@@ -3372,12 +3425,20 @@ export class OperonSettingsTab extends PluginSettingTab {
 		new Setting(bodyInner)
 			.setName(t('calendar', 'taskColorSource'))
 			.setDesc(t('calendar', 'taskColorSourceDesc'))
-			.addDropdown(dropdown => {
-				addTaskColorSourceOptions(dropdown, CALENDAR_TASK_COLOR_SOURCES);
-				dropdown.setValue(preset.colorSource);
-				dropdown.onChange(async (value) => {
-					await this.updateCalendarPreset(preset.id, current => {
-						current.colorSource = normalizeTaskColorSource(value, CALENDAR_TASK_COLOR_SOURCES, 'taskColor');
+			.addButton(button => {
+				const currentSource = normalizeTaskColorSource(preset.colorSource, CALENDAR_TASK_COLOR_SOURCES, 'taskColor');
+				renderTaskColorSourceSelectButton(button.buttonEl, currentSource);
+				button.onClick(event => {
+					event.preventDefault();
+					showTaskColorSourceSelectMenu(button.buttonEl, {
+						sources: CALENDAR_TASK_COLOR_SOURCES,
+						currentSource,
+						onSelect: settingsAsyncHandler('settings calendar preset task color source selection failed', async (source) => {
+							await this.updateCalendarPreset(preset.id, current => {
+								current.colorSource = source;
+							});
+							this.display();
+						}),
 					});
 				});
 			});
@@ -3420,6 +3481,30 @@ export class OperonSettingsTab extends PluginSettingTab {
 				});
 			});
 
+		new Setting(bodyInner)
+			.setName(t('calendar', 'showFutureOccurrences'))
+			.setDesc(t('calendar', 'showFutureOccurrencesDesc'))
+			.addToggle(toggle => {
+				toggle.setValue(preset.showProjectedOccurrences);
+				toggle.onChange(async (value) => {
+					await this.updateCalendarPreset(preset.id, current => {
+						current.showProjectedOccurrences = value;
+					});
+				});
+			});
+
+		new Setting(bodyInner)
+			.setName(t('calendar', 'showExternalCalendars'))
+			.setDesc(t('calendar', 'showExternalCalendarsDesc'))
+			.addToggle(toggle => {
+				toggle.setValue(preset.showExternalCalendars);
+				toggle.onChange(async (value) => {
+					await this.updateCalendarPreset(preset.id, current => {
+						current.showExternalCalendars = value;
+					});
+				});
+			});
+
 		const externalCalendars = this.settings.externalCalendars;
 		if (externalCalendars.length > 0) {
 			renderSettingsHeading(bodyInner, t('calendar', 'externalCalendarsSection'), 'operon-preset-settings-section-heading');
@@ -3430,6 +3515,10 @@ export class OperonSettingsTab extends PluginSettingTab {
 					.addToggle(toggle => {
 						toggle.setValue(isVisible);
 						toggle.onChange(async (value) => {
+							if (value) {
+								const matchingSource = this.settings.externalCalendars.find(entry => entry.id === source.id);
+								if (matchingSource) matchingSource.enabled = true;
+							}
 							await this.updateCalendarPreset(preset.id, current => {
 								current.externalCalendarVisibility[source.id] = value;
 							});
@@ -5610,6 +5699,7 @@ export class OperonSettingsTab extends PluginSettingTab {
 		this.renderExcludedFolderSettings(containerEl);
 
 		this.renderFileTaskDailyNotesSettings(containerEl);
+		this.renderFileTaskArchiveSettings(containerEl);
 		this.renderFileTaskMigrationSettings(containerEl);
 
 		renderPreview();
@@ -5619,6 +5709,39 @@ export class OperonSettingsTab extends PluginSettingTab {
 		const wrapper = containerEl.createDiv({ cls: 'operon-file-task-daily-notes-setting' });
 		renderSettingsHeading(wrapper, t('settings', 'fileTaskDailyNotes'));
 		this.renderBoundToggleSetting(wrapper, t('settings', 'createDailyNotesAsOperonTask'), t('settings', 'createDailyNotesAsOperonTaskDesc'), 'createDailyNotesAsOperonTask');
+	}
+
+	private renderFileTaskArchiveSettings(containerEl: HTMLElement): void {
+		const wrapper = containerEl.createDiv({ cls: 'operon-file-task-archive-setting' });
+		renderSettingsHeading(wrapper, t('settings', 'fileTaskArchive'));
+
+		this.renderBoundToggleSetting(
+			wrapper,
+			t('settings', 'fileTaskAutoArchiveEnabled'),
+			t('settings', 'fileTaskAutoArchiveEnabledDesc'),
+			'fileTaskAutoArchiveEnabled',
+		);
+
+		this.renderBoundTextSetting(wrapper, t('settings', 'fileTaskArchiveFolder'), t('settings', 'fileTaskArchiveFolderDesc'), 'fileTaskArchiveFolder', {
+			placeholder: t('settings', 'fileTaskArchiveFolderPlaceholder'),
+			settingClass: 'operon-settings-long-text-setting',
+			controlClass: 'operon-settings-input-long',
+			normalize: value => normalizeSettingsFolderPath(value) || DEFAULT_SETTINGS.fileTaskArchiveFolder,
+			configure: text => {
+				new FolderSuggest(this.app, text.inputEl, settingsAsyncHandler('settings file task archive folder selection failed', async (folder) => {
+					this.settings.fileTaskArchiveFolder = normalizeSettingsFolderPath(folder.path) || DEFAULT_SETTINGS.fileTaskArchiveFolder;
+					await this.saveSettings();
+				}));
+			},
+		});
+
+		this.addNumericSetting(wrapper, t('settings', 'fileTaskArchiveDelaySeconds'), t('settings', 'fileTaskArchiveDelaySecondsDesc'), 'fileTaskArchiveDelaySeconds');
+		this.renderBoundToggleSetting(
+			wrapper,
+			t('settings', 'fileTaskArchiveOnlyFromFileTasksFolder'),
+			t('settings', 'fileTaskArchiveOnlyFromFileTasksFolderDesc'),
+			'fileTaskArchiveOnlyFromFileTasksFolder',
+		);
 	}
 
 	private renderExcludedFolderSettings(containerEl: HTMLElement): void {

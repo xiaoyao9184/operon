@@ -46,7 +46,7 @@ import {
 	sanitizeExcludedFoldersForFileTasksFolder,
 } from '../core/settings-folder-rules';
 
-export const CURRENT_SETTINGS_VERSION = 77;
+export const CURRENT_SETTINGS_VERSION = 80;
 export const CURRENT_TASK_STATS_BACKFILL_VERSION = 1;
 
 export type FallbackTaskIconSource = 'pipelineStatusIcon' | 'priorityIcon' | 'stateIcon';
@@ -127,6 +127,7 @@ export const KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MIN = 1;
 export const KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MAX = 30;
 export type TrackerTaskDescriptionClickAction = 'jumpToSource' | 'openTaskEditor';
 export type FlowTimeMode = 'tracktime' | 'flowtime';
+export type InlineTaskSaveMode = 'daily-notes' | 'specific-file' | 'active-file' | 'ask-every-time';
 export type InlineTaskParentInlineTargetMode = 'default' | 'below-parent';
 export type InlineTaskParentFileTargetMode = 'default' | 'inside-parent-file';
 export type FileTaskParentInlineTargetMode = 'default' | 'same-folder';
@@ -288,6 +289,19 @@ export const TASK_CREATOR_TOOLBAR_FIELD_ORDER = [
 
 export type TaskCreatorToolbarFieldKey = typeof TASK_CREATOR_TOOLBAR_FIELD_ORDER[number];
 
+export const TASK_EDITOR_WORKFLOW_PICKER_ORDER = [
+	'contexts',
+	'tags',
+	'assignees',
+	'links',
+	'parentTask',
+	'subtasks',
+	'blocking',
+	'blockedBy',
+] as const;
+
+export type TaskEditorWorkflowPickerKey = typeof TASK_EDITOR_WORKFLOW_PICKER_ORDER[number];
+
 export const INLINE_TASK_COMPACT_CHIP_ORDER = [
 	'priority',
 	'status',
@@ -358,6 +372,11 @@ export const TASK_CREATOR_FALLBACK_FIELD_ICONS: Record<TaskCreatorToolbarFieldKe
 
 export interface TaskCreatorToolbarItem {
 	key: TaskCreatorToolbarFieldKey;
+	visible: boolean;
+}
+
+export interface TaskEditorWorkflowPickerItem {
+	key: TaskEditorWorkflowPickerKey;
 	visible: boolean;
 }
 
@@ -474,6 +493,23 @@ function buildDefaultTaskCreatorToolbarItems(): TaskCreatorToolbarItem[] {
 		{ key: 'assignees', visible: true },
 		{ key: 'note', visible: true },
 	];
+}
+
+function buildDefaultTaskEditorWorkflowPickerItems(): TaskEditorWorkflowPickerItem[] {
+	return [
+		{ key: 'contexts', visible: true },
+		{ key: 'tags', visible: true },
+		{ key: 'assignees', visible: true },
+		{ key: 'links', visible: true },
+		{ key: 'parentTask', visible: true },
+		{ key: 'subtasks', visible: true },
+		{ key: 'blocking', visible: false },
+		{ key: 'blockedBy', visible: false },
+	];
+}
+
+export function buildCompatibilityTaskEditorWorkflowPickerItems(): TaskEditorWorkflowPickerItem[] {
+	return TASK_EDITOR_WORKFLOW_PICKER_ORDER.map(key => ({ key, visible: true }));
 }
 
 function buildDefaultFilterTaskCompactChipItems(): InlineTaskCompactChipItem[] {
@@ -680,11 +716,21 @@ export interface OperonSettings {
 
 	/** Default folder for new file tasks. Empty = vault root. */
 	fileTasksFolder: string;
+	/** If true, finished/cancelled file tasks are moved to the archive folder after a delay. */
+	fileTaskAutoArchiveEnabled: boolean;
+	/** Folder where finished/cancelled file tasks are moved. */
+	fileTaskArchiveFolder: string;
+	/** Seconds to wait before moving an eligible finished/cancelled file task. */
+	fileTaskArchiveDelaySeconds: number;
+	/** If true, only file tasks currently inside fileTasksFolder are auto-archived. */
+	fileTaskArchiveOnlyFromFileTasksFolder: boolean;
 	/** Where New Operon Task writes file tasks when the selected parent is an inline task. */
 	fileTaskParentInlineTargetMode: FileTaskParentInlineTargetMode;
 	/** Where New Operon Task writes file tasks when the selected parent is a file task. */
 	fileTaskParentFileTargetMode: FileTaskParentFileTargetMode;
-	/** If true, new inline tasks from New Operon Task are written to today's daily note. */
+	/** Where New Operon Task writes inline tasks by default. */
+	inlineTaskSaveMode: InlineTaskSaveMode;
+	/** Legacy daily-note toggle mirror for compatibility with older stores. */
 	inlineTaskUseDailyNote: boolean;
 	/** Optional fixed markdown file target used when inlineTaskUseDailyNote is false. */
 	inlineTaskTargetFile: string;
@@ -704,6 +750,8 @@ export interface OperonSettings {
 	estimateAutoReallocation: boolean;
 	/** Ordered, user-customizable visual controls for the New Operon Task toolbar. */
 	taskCreatorToolbar: TaskCreatorToolbarItem[];
+	/** Ordered, user-customizable picker rows shown in the Task Editor workflow area. */
+	taskEditorWorkflowPickers: TaskEditorWorkflowPickerItem[];
 	/** Ordered, user-customizable compact inline-task chips used in live preview conceal and reading view. */
 	inlineTaskCompactChips: InlineTaskCompactChipItem[];
 	/** Ordered, user-customizable compact filter chips used by filter surfaces. */
@@ -1041,8 +1089,13 @@ export const DEFAULT_SETTINGS: OperonSettings = {
 	taskDescriptionRequired: true,
 	assigneesRequired: false,
 	fileTasksFolder: 'Operon/Tasks',
+	fileTaskAutoArchiveEnabled: false,
+	fileTaskArchiveFolder: 'Operon/Archives',
+	fileTaskArchiveDelaySeconds: 30,
+	fileTaskArchiveOnlyFromFileTasksFolder: true,
 	fileTaskParentInlineTargetMode: 'same-folder',
 	fileTaskParentFileTargetMode: 'same-folder',
+	inlineTaskSaveMode: 'daily-notes',
 	inlineTaskUseDailyNote: true,
 	inlineTaskTargetFile: DEFAULT_INLINE_TASK_TARGET_FILE,
 	inlineTaskHeading: '',
@@ -1053,6 +1106,7 @@ export const DEFAULT_SETTINGS: OperonSettings = {
 	autoParentLinkedFileSubtasks: true,
 	estimateAutoReallocation: false,
 	taskCreatorToolbar: buildDefaultTaskCreatorToolbarItems(),
+	taskEditorWorkflowPickers: buildDefaultTaskEditorWorkflowPickerItems(),
 	inlineTaskCompactChips: buildDefaultInlineTaskCompactChipItems(),
 	filterTaskCompactChips: buildDefaultFilterTaskCompactChipItems(),
 	taskFinderCompactChips: buildDefaultTaskFinderCompactChipItems(),
@@ -1192,6 +1246,7 @@ export const NUMERIC_CONSTRAINTS = {
 	kanbanMaxVisibleTasksPerCell: { min: KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MIN, max: KANBAN_MAX_VISIBLE_TASKS_PER_CELL_MAX },
 	taskFinderRecentModifiedDays: { min: 1, max: 7 },
 	taskFinderVisibleResultCount: { min: 3, max: 9 },
+	fileTaskArchiveDelaySeconds: { min: 0, max: 3600 },
 		indexEventDebounceMs: { min: 0, max: 2000 },
 		defaultEstimateMinutes: { min: 5, max: 480 },
 				trackerHistoryDays: { min: 1, max: 365 },
@@ -1302,6 +1357,30 @@ function normalizeExternalCalendars(raw: unknown): ExternalCalendarSource[] {
 	return next;
 }
 
+function preserveDisabledExternalCalendarVisibility(
+	presets: CalendarPreset[],
+	sources: ExternalCalendarSource[],
+): CalendarPreset[] {
+	const disabledSourceIds = new Set(
+		sources
+			.filter(source => source.enabled === false)
+			.map(source => source.id),
+	);
+	if (disabledSourceIds.size === 0) return presets;
+	return presets.map(preset => {
+		const externalCalendarVisibility = { ...preset.externalCalendarVisibility };
+		for (const sourceId of disabledSourceIds) {
+			if (externalCalendarVisibility[sourceId] === true) {
+				externalCalendarVisibility[sourceId] = false;
+			}
+		}
+		return {
+			...preset,
+			externalCalendarVisibility,
+		};
+	});
+}
+
 function normalizeFileTaskTemplateDefinition(raw: unknown): FileTaskTemplateDefinition | null {
 	if (!raw || typeof raw !== 'object') return null;
 	const src = raw as Record<string, unknown>;
@@ -1360,6 +1439,8 @@ function normalizeCalendarPresetDefinition(raw: unknown): CalendarPreset | null 
 		showAllDayLane: src.showAllDayLane !== false,
 		showDueMarkers: src.showDueMarkers !== false,
 		showWeekends: src.showWeekends !== false,
+		showProjectedOccurrences: src.showProjectedOccurrences !== false,
+		showExternalCalendars: src.showExternalCalendars !== false,
 		hiddenTimeStart,
 		hiddenTimeEnd,
 		colorSource,
@@ -2037,6 +2118,15 @@ function normalizeTaskStatsBackfillVersion(raw: unknown): number {
 	return Math.max(0, Math.min(CURRENT_TASK_STATS_BACKFILL_VERSION, Math.floor(raw)));
 }
 
+function normalizeInlineTaskSaveMode(raw: unknown, fallback: InlineTaskSaveMode): InlineTaskSaveMode {
+	return raw === 'daily-notes'
+		|| raw === 'specific-file'
+		|| raw === 'active-file'
+		|| raw === 'ask-every-time'
+		? raw
+		: fallback;
+}
+
 export function normalizeFallbackTaskIconSource(value: unknown): FallbackTaskIconSource {
 	return value === 'stateIcon' || value === 'priorityIcon' ? value : 'pipelineStatusIcon';
 }
@@ -2164,6 +2254,7 @@ export function migrateSettings(raw: unknown): OperonSettings {
 		src.contextualMenuOpenDelayMs ?? src.calendarHoverMenuOpenDelayMs,
 	);
 	out.externalCalendars = normalizeExternalCalendars(src.externalCalendars);
+	out.calendarPresets = preserveDisabledExternalCalendarVisibility(out.calendarPresets, out.externalCalendars);
 	const legacyCalendarInlineTaskHeading = typeof src.calendarInlineTaskHeading === 'string'
 		? src.calendarInlineTaskHeading.trim()
 		: '';
@@ -2176,6 +2267,11 @@ export function migrateSettings(raw: unknown): OperonSettings {
 	out.inlineTaskTargetFile = typeof src.inlineTaskTargetFile === 'string'
 		? src.inlineTaskTargetFile.trim()
 		: DEFAULT_SETTINGS.inlineTaskTargetFile;
+	const legacyInlineTaskSaveMode = src.inlineTaskUseDailyNote === false
+		? 'specific-file'
+		: DEFAULT_SETTINGS.inlineTaskSaveMode;
+	out.inlineTaskSaveMode = normalizeInlineTaskSaveMode(src.inlineTaskSaveMode, legacyInlineTaskSaveMode);
+	out.inlineTaskUseDailyNote = out.inlineTaskSaveMode === 'daily-notes';
 	out.inlineTaskHeading = sourceInlineTaskHeading
 		? normalizeInlineTaskHeadingKeyword(sourceInlineTaskHeading)
 		: DEFAULT_SETTINGS.inlineTaskHeading;
@@ -2201,6 +2297,12 @@ export function migrateSettings(raw: unknown): OperonSettings {
 		? normalizeInlineTaskParentFileHeadingKeyword(src.inlineTaskParentFileHeadingKeyword)
 		: DEFAULT_SETTINGS.inlineTaskParentFileHeadingKeyword;
 	out.taskCreatorToolbar = normalizeTaskCreatorToolbar(src.taskCreatorToolbar);
+	out.taskEditorWorkflowPickers = normalizeTaskEditorWorkflowPickers(
+		src.taskEditorWorkflowPickers,
+		'taskEditorWorkflowPickers' in src || Object.keys(src).length === 0
+			? DEFAULT_SETTINGS.taskEditorWorkflowPickers
+			: buildCompatibilityTaskEditorWorkflowPickerItems(),
+	);
 	out.inlineTaskCompactChips = normalizeInlineTaskCompactChips(src.inlineTaskCompactChips);
 	out.filterTaskCompactChips = normalizeFilterTaskCompactChips(src);
 	out.taskFinderCompactChips = normalizeTaskFinderCompactChips(src.taskFinderCompactChips);
@@ -2445,6 +2547,11 @@ export function migrateSettings(raw: unknown): OperonSettings {
 	}
 
 	out.fileTasksFolder = normalizeSettingsFolderPath(out.fileTasksFolder);
+	out.fileTaskArchiveFolder = normalizeSettingsFolderPath(out.fileTaskArchiveFolder);
+	if (!out.fileTaskArchiveFolder) {
+		out.fileTaskArchiveFolder = DEFAULT_SETTINGS.fileTaskArchiveFolder;
+	}
+	out.fileTaskArchiveDelaySeconds = Math.round(clamp(out.fileTaskArchiveDelaySeconds, 'fileTaskArchiveDelaySeconds'));
 	out.fileTaskTemplateFolder = resolveFileTaskTemplateFolder(src);
 	out.excludedFolders = sanitizeExcludedFoldersForFileTasksFolder(
 		normalizeFolderPathList(src.excludedFolders),
@@ -2491,6 +2598,42 @@ function normalizeTaskCreatorToolbar(raw: unknown): TaskCreatorToolbarItem[] {
 		if (seen.has(key)) continue;
 		const item = defaults.find(candidate => candidate.key === key) ?? { key, visible: true };
 		insertMissingOrderedItem(normalized, item, TASK_CREATOR_TOOLBAR_FIELD_ORDER);
+	}
+
+	return normalized;
+}
+
+export function normalizeTaskEditorWorkflowPickers(
+	raw: unknown,
+	fallback: TaskEditorWorkflowPickerItem[] = buildDefaultTaskEditorWorkflowPickerItems(),
+): TaskEditorWorkflowPickerItem[] {
+	if (!Array.isArray(raw)) {
+		return fallback.map(item => ({ ...item }));
+	}
+
+	const allowed = new Set<TaskEditorWorkflowPickerKey>(TASK_EDITOR_WORKFLOW_PICKER_ORDER);
+	const normalized: TaskEditorWorkflowPickerItem[] = [];
+	const seen = new Set<TaskEditorWorkflowPickerKey>();
+
+	for (const item of raw) {
+		if (!item || typeof item !== 'object') continue;
+		const key = (item as Record<string, unknown>).key;
+		const visible = (item as Record<string, unknown>).visible;
+		if (typeof key !== 'string' || !allowed.has(key as TaskEditorWorkflowPickerKey)) continue;
+		const typedKey = key as TaskEditorWorkflowPickerKey;
+		if (seen.has(typedKey)) continue;
+		seen.add(typedKey);
+		normalized.push({
+			key: typedKey,
+			visible: typeof visible === 'boolean'
+				? visible
+				: fallback.find(candidate => candidate.key === typedKey)?.visible ?? true,
+		});
+	}
+
+	for (const item of fallback) {
+		if (seen.has(item.key)) continue;
+		insertMissingOrderedItem(normalized, { ...item }, TASK_EDITOR_WORKFLOW_PICKER_ORDER);
 	}
 
 	return normalized;

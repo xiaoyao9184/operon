@@ -42,6 +42,7 @@ interface FlowTimeViewCallbacks {
 	getSettings: () => OperonSettings;
 	saveSettings: () => Promise<void>;
 	createInlineTaskFromQuickInput: (draft: TaskCreatorDraft) => Promise<QuickInlineTaskCreationResult | null>;
+	shouldPromptForInlineTaskTarget: () => boolean;
 	startTimerForTask: (operonId: string, source: TrackerSource, startOverride?: string | null) => Promise<boolean>;
 	startUnassignedTimer: (source: TrackerSource) => Promise<boolean>;
 	stopActiveTimer: (reason: TrackerStopReason) => Promise<boolean>;
@@ -314,7 +315,7 @@ export class FlowTimeView extends ItemView {
 				ariaLabel: t('taskEditor', 'flowTimeSelectTask'),
 				className: 'operon-flow-time-quick-task-input',
 				submitErrorContext: 'flow time quick task creation failed',
-				submitInBackground: true,
+				submitInBackground: !this.callbacks.shouldPromptForInlineTaskTarget(),
 				onSubmit: (draft) => this.createQuickInlineTask(draft),
 			});
 			this.renderTaskActionButton(box, active);
@@ -736,32 +737,50 @@ export class FlowTimeView extends ItemView {
 	}
 
 	private async createQuickInlineTask(draft: TaskCreatorDraft): Promise<QuickInlineTaskCreationResult | null> {
-		this.pendingTaskId = null;
-		this.pendingDraft = {
-			description: draft.description,
-			start: localNow(),
-			startedAtMs: Date.now(),
-		};
-		this.startPendingDraftTicker();
-		this.lastRenderSignature = null;
-		this.render();
+		const promptForInlineTarget = this.callbacks.shouldPromptForInlineTaskTarget();
+		if (!promptForInlineTarget) {
+			this.pendingTaskId = null;
+			this.pendingDraft = {
+				description: draft.description,
+				start: localNow(),
+				startedAtMs: Date.now(),
+			};
+			this.startPendingDraftTicker();
+			this.lastRenderSignature = null;
+			this.render();
+		}
 
 		let result: QuickInlineTaskCreationResult | null = null;
 		try {
 			result = await this.callbacks.createInlineTaskFromQuickInput(draft);
 		} catch (error) {
-			this.pendingDraft = null;
-			this.stopPendingDraftTicker();
-			this.lastRenderSignature = null;
-			this.render();
+			if (!promptForInlineTarget) {
+				this.pendingDraft = null;
+				this.stopPendingDraftTicker();
+				this.lastRenderSignature = null;
+				this.render();
+			}
 			throw error;
 		}
 		if (!result) {
-			this.pendingDraft = null;
-			this.stopPendingDraftTicker();
+			if (!promptForInlineTarget) {
+				this.pendingDraft = null;
+				this.stopPendingDraftTicker();
+				this.lastRenderSignature = null;
+				this.render();
+			}
+			return null;
+		}
+		if (promptForInlineTarget) {
+			this.pendingTaskId = null;
+			this.pendingDraft = {
+				description: draft.description,
+				start: localNow(),
+				startedAtMs: Date.now(),
+			};
+			this.startPendingDraftTicker();
 			this.lastRenderSignature = null;
 			this.render();
-			return null;
 		}
 
 		const wasBreak = !!this.breakState;
