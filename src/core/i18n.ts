@@ -1,6 +1,6 @@
 /**
  * Internationalization (i18n) module for Operon.
- * Bilingual support: English (default) + Turkish.
+ * Multilingual support: English (default) + Turkish + Chinese.
  *
  * Spec Section 25:
  * - JSON locale files at i18n/locales/
@@ -13,12 +13,13 @@
 
 import en from '../../i18n/locales/en.json';
 import tr from '../../i18n/locales/tr.json';
+import zh from '../../i18n/locales/zh.json';
 
 /** All available locale data, keyed by language code */
-const LOCALES: Record<string, LocaleData> = { en, tr };
+const LOCALES: Record<string, LocaleData> = { en, tr, zh };
 
 /** Supported language codes */
-export type LangCode = 'en' | 'tr';
+export type LangCode = 'en' | 'tr' | 'zh';
 
 /** Structure of a locale file — matches Spec Section 25.4 */
 export interface LocaleData {
@@ -45,7 +46,7 @@ let currentLocale: LocaleData = en;
 
 /**
  * Initialize i18n.
- * If languageOverride is 'en' or 'tr', use that directly.
+ * If languageOverride is 'en', 'tr', or 'zh', use that directly.
  * If languageOverride is 'auto' (or undefined), detect from Obsidian's locale.
  * Falls back to English if the detected locale isn't available.
  *

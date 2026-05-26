@@ -80,6 +80,32 @@ const STRINGS: Record<DatePickerLang, DatePickerStrings> = {
 		nextWeekdayLabel: name => `Gelecek ${name.toLowerCase()}`,
 		lastWeekdayLabel: name => `Gecen ${name.toLowerCase()}`,
 	},
+	zh: {
+		searchPlaceholder: '输入日期，例如下周二',
+		clear: '清除',
+		apply: '应用',
+		manualDate: '选择日期',
+		parsedFrom: input => `解析自「${input}」`,
+		quickSuggestions: '建议',
+		today: '今天',
+		tomorrow: '明天',
+		yesterday: '昨天',
+		thisWeek: '本周',
+		nextWeek: '下周',
+		lastWeek: '上周',
+		thisWeekend: '本周末',
+		nextWeekend: '下周末',
+		lastWeekend: '上周末',
+		daysAgo: count => `${count} 天前`,
+		daysFromNow: count => `${count} 天后`,
+		weeksAgo: count => `${count} 周前`,
+		weeksFromNow: count => `${count} 周后`,
+		monthsAgo: count => `${count} 个月前`,
+		monthsFromNow: count => `${count} 个月后`,
+		weekdayNames: ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'],
+		nextWeekdayLabel: name => `下${name.replace(/^星期/, '')}`,
+		lastWeekdayLabel: name => `上${name.replace(/^星期/, '')}`,
+	},
 };
 
 const ENGLISH_PHRASES: Record<string, (reference: Date) => Date> = {
@@ -92,6 +118,18 @@ const ENGLISH_PHRASES: Record<string, (reference: Date) => Date> = {
 	'this weekend': reference => saturdayOfWeek(reference),
 	'next weekend': reference => addDays(saturdayOfWeek(reference), 7),
 	'last weekend': reference => addDays(saturdayOfWeek(reference), -7),
+};
+
+const CHINESE_PHRASES: Record<string, (reference: Date) => Date> = {
+	'今天': reference => cloneDate(reference),
+	'明天': reference => addDays(reference, 1),
+	'昨天': reference => addDays(reference, -1),
+	'本周': reference => startOfWeek(reference),
+	'下周': reference => addDays(startOfWeek(reference), 7),
+	'上周': reference => addDays(startOfWeek(reference), -7),
+	'本周末': reference => saturdayOfWeek(reference),
+	'下周末': reference => addDays(saturdayOfWeek(reference), 7),
+	'上周末': reference => addDays(saturdayOfWeek(reference), -7),
 };
 
 const TURKISH_PHRASES: Record<string, (reference: Date) => Date> = {
@@ -114,6 +152,24 @@ const ENGLISH_WEEKDAYS = new Map<string, number>([
 	['thursday', 4],
 	['friday', 5],
 	['saturday', 6],
+]);
+
+const CHINESE_WEEKDAYS = new Map<string, number>([
+	['星期日', 0],
+	['星期天', 0],
+	['周日', 0],
+	['星期一', 1],
+	['周一', 1],
+	['星期二', 2],
+	['周二', 2],
+	['星期三', 3],
+	['周三', 3],
+	['星期四', 4],
+	['周四', 4],
+	['星期五', 5],
+	['周五', 5],
+	['星期六', 6],
+	['周六', 6],
 ]);
 
 const TURKISH_WEEKDAYS = new Map<string, number>([
@@ -188,13 +244,21 @@ export function parseFallbackDateCandidates(input: string, context: DateParseCon
 }
 
 function parsePhraseDate(input: string, language: DatePickerLang, reference: Date): Date | null {
-	const phrases = language === 'tr' ? TURKISH_PHRASES : ENGLISH_PHRASES;
+	const phrases = language === 'tr'
+		? TURKISH_PHRASES
+		: language === 'zh'
+			? CHINESE_PHRASES
+			: ENGLISH_PHRASES;
 	const direct = phrases[input];
 	if (direct) return direct(reference);
 
-	const weekdays = language === 'tr' ? TURKISH_WEEKDAYS : ENGLISH_WEEKDAYS;
-	const nextPrefix = language === 'tr' ? 'gelecek ' : 'next ';
-	const lastPrefix = language === 'tr' ? 'gecen ' : 'last ';
+	const weekdays = language === 'tr'
+		? TURKISH_WEEKDAYS
+		: language === 'zh'
+			? CHINESE_WEEKDAYS
+			: ENGLISH_WEEKDAYS;
+	const nextPrefix = language === 'tr' ? 'gelecek ' : language === 'zh' ? '下' : 'next ';
+	const lastPrefix = language === 'tr' ? 'gecen ' : language === 'zh' ? '上' : 'last ';
 
 	if (weekdays.has(input)) {
 		return nextWeekday(reference, weekdays.get(input)!);
@@ -259,11 +323,17 @@ function matchesUnit(token: string, language: DatePickerLang, unit: 'days' | 'we
 			weeks: ['h', 'ha', 'haf', 'hafta'],
 			months: ['a', 'ay'],
 		}
-		: {
-			days: ['d', 'da', 'day', 'days'],
-			weeks: ['w', 'we', 'wee', 'week', 'weeks'],
-			months: ['m', 'mo', 'mon', 'month', 'months'],
-		};
+		: language === 'zh'
+			? {
+				days: ['天', '日'],
+				weeks: ['周', '星期'],
+				months: ['月'],
+			}
+			: {
+				days: ['d', 'da', 'day', 'days'],
+				weeks: ['w', 'we', 'wee', 'week', 'weeks'],
+				months: ['m', 'mo', 'mon', 'month', 'months'],
+			};
 	return prefixes[unit].some(prefix => prefix.startsWith(lowered) || lowered.startsWith(prefix));
 }
 
@@ -362,7 +432,8 @@ function toIsoDate(date: Date): string {
 }
 
 function formatLongDate(date: Date, language: DatePickerLang): string {
-	return new Intl.DateTimeFormat(language === 'tr' ? 'tr-TR' : 'en-US', {
+	const locale = language === 'tr' ? 'tr-TR' : language === 'zh' ? 'zh-CN' : 'en-US';
+	return new Intl.DateTimeFormat(locale, {
 		weekday: 'long',
 		year: 'numeric',
 		month: 'long',

@@ -4,7 +4,7 @@ import { getCommunityPlugin } from '../../core/obsidian-app';
 import { isRecord, isUnknownFunction } from '../../core/unknown-value';
 import { getDatePickerStrings, getQuickDateCandidates, parseFallbackDateCandidates } from './date-nlp-fallback';
 
-export type DatePickerLang = 'en' | 'tr';
+export type DatePickerLang = 'en' | 'tr' | 'zh';
 
 export interface DateParseContext {
 	fieldKey: string;
@@ -36,6 +36,7 @@ interface MomentLike {
 export function resolveDatePickerLanguage(language?: string): DatePickerLang {
 	if (language === 'tr') return 'tr';
 	if (language === 'en') return 'en';
+	if (language === 'zh') return 'zh';
 	return getCurrentLang();
 }
 
@@ -133,7 +134,8 @@ function toIsoDate(date: Date): string {
 }
 
 function formatLongDate(date: Date, language: DatePickerLang): string {
-	return new Intl.DateTimeFormat(language === 'tr' ? 'tr-TR' : 'en-US', {
+	const locale = language === 'tr' ? 'tr-TR' : language === 'zh' ? 'zh-CN' : 'en-US';
+	return new Intl.DateTimeFormat(locale, {
 		weekday: 'long',
 		year: 'numeric',
 		month: 'long',
