@@ -705,7 +705,7 @@ export interface OperonSettings {
 	filterShowOnlyOpenSubtasks: boolean;
 
 	/** UI language override. 'auto' = detect from Obsidian locale. */
-	language: 'auto' | 'en' | 'tr';
+	language: 'auto' | 'en' | 'tr' | 'zh';
 	timeFormat: '24h' | '12h';
 	demoWorkspacePromptDismissed: boolean;
 
@@ -2169,7 +2169,7 @@ export function migrateSettings(raw: unknown): OperonSettings {
 	}
 
 	// Validate enum fields
-	if (!['auto', 'en', 'tr'].includes(out.language)) {
+	if (!['auto', 'en', 'tr', 'zh'].includes(out.language)) {
 		out.language = DEFAULT_SETTINGS.language;
 	}
 	if (!['24h', '12h'].includes(out.timeFormat)) {
